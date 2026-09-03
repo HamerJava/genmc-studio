@@ -14,13 +14,13 @@ async function officialSkin(name:string):Promise<{bytes:ArrayBuffer;slim:boolean
  const url=new URL(texture?.url);
  if(url.hostname!=='textures.minecraft.net'||!/^\/texture\/[a-f0-9]+$/.test(url.pathname))throw Error('Invalid texture host');
  url.protocol='https:';
- const png=await fetch(url,{signal:AbortSignal.timeout(6000),redirect:'error'});
+ const png=await fetch(url,{signal:AbortSignal.timeout(6000),redirect:'manual'});
  if(!png.ok)throw Error('Skin download failed');
  return {bytes:await png.arrayBuffer(),slim:texture.metadata?.model==='slim',cached:false};
 }
 async function cachedSkin(name:string){
  // Public, documented profile cache. No user-provided URL is ever fetched.
- const response=await fetch(`https://api.ashcon.app/mojang/v2/user/${name}`,{signal:AbortSignal.timeout(8000),redirect:'error'});
+ const response=await fetch(`https://api.ashcon.app/mojang/v2/user/${name}`,{signal:AbortSignal.timeout(8000),redirect:'manual'});
  if(!response.ok)throw Error(response.status===404?'Player not found.':'Minecraft profile services are unavailable. Try PNG upload.');
  const profile=await response.json() as {textures?:{slim?:boolean;skin?:{data?:string}}};
  const data=profile.textures?.skin?.data;
