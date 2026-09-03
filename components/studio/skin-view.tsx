@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as T from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { atlas, dimensions, parts, type Part } from '@/lib/skin/atlas';
@@ -61,6 +61,7 @@ export default function SkinView(props: Props) {
   latest.current = props;
   const state = useRef<Runtime | null>(null);
   const down = useRef(false);
+  const [hovered, setHovered] = useState(false);
   useEffect(() => {
     const el = host.current!;
     let disposed = false;
@@ -93,8 +94,14 @@ export default function SkinView(props: Props) {
     const hints = new T.CanvasTexture(hc);
     hints.magFilter = hints.minFilter = T.NearestFilter;
     hints.colorSpace = T.SRGBColorSpace;
+    let hoverPointer: Pick<PointerEvent, 'clientX' | 'clientY'> | null = null;
+    let hovering = false;
+    let refreshHover = () => {};
     const render = () => {
-      if (!disposed) renderer.render(scene, camera);
+      if (!disposed) {
+        renderer.render(scene, camera);
+        refreshHover();
+      }
     };
     state.current = {
       texture,
@@ -144,10 +151,17 @@ export default function SkinView(props: Props) {
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    const pick = (e: PointerEvent) => {
+    const pick = (e: Pick<PointerEvent, 'clientX' | 'clientY'>) => {
       const s = state.current;
       if (!s) return;
       const rect = renderer.domElement.getBoundingClientRect();
+      if (
+        e.clientX < rect.left ||
+        e.clientX >= rect.right ||
+        e.clientY < rect.top ||
+        e.clientY >= rect.bottom
+      )
+        return;
       const ray = new T.Raycaster();
       ray.setFromCamera(
         new T.Vector2(
@@ -164,6 +178,21 @@ export default function SkinView(props: Props) {
             h.object.userData.layer === latest.current.view.layer,
         );
     };
+    refreshHover = () => {
+      const next = !!(hoverPointer && pick(hoverPointer));
+      if (next !== hovering) {
+        hovering = next;
+        setHovered(next);
+      }
+    };
+    const trackHover = (e: PointerEvent) => {
+      hoverPointer = { clientX: e.clientX, clientY: e.clientY };
+      refreshHover();
+    };
+    const leave = () => {
+      hoverPointer = null;
+      refreshHover();
+    };
     const paintAt = (hit: ReturnType<typeof pick>) => {
       if (hit?.uv)
         latest.current.onPixel?.(
@@ -175,6 +204,7 @@ export default function SkinView(props: Props) {
     let painting = false;
     const start = (e: PointerEvent) => {
       if (e.button !== 0 || activePointer !== null) return;
+      trackHover(e);
       const hit = latest.current.paint ? pick(e) : undefined;
       activePointer = e.pointerId;
       down.current = true;
@@ -189,6 +219,7 @@ export default function SkinView(props: Props) {
       }
     };
     const move = (e: PointerEvent) => {
+      trackHover(e);
       if (painting && e.pointerId === activePointer) paintAt(pick(e));
     };
     const end = (e: PointerEvent) => {
@@ -198,9 +229,13 @@ export default function SkinView(props: Props) {
       painting = false;
       down.current = false;
       controls.enabled = true;
+      if (e.pointerType === 'touch' || e.type !== 'pointerup') leave();
+      else trackHover(e);
     };
     renderer.domElement.addEventListener('pointerdown', start, true);
     renderer.domElement.addEventListener('pointermove', move);
+    renderer.domElement.addEventListener('pointerenter', trackHover);
+    renderer.domElement.addEventListener('pointerleave', leave);
     renderer.domElement.addEventListener('pointerup', end);
     renderer.domElement.addEventListener('pointercancel', end);
     renderer.domElement.addEventListener('lostpointercapture', end);
@@ -210,6 +245,8 @@ export default function SkinView(props: Props) {
       ro.disconnect();
       renderer.domElement.removeEventListener('pointerdown', start, true);
       renderer.domElement.removeEventListener('pointermove', move);
+      renderer.domElement.removeEventListener('pointerenter', trackHover);
+      renderer.domElement.removeEventListener('pointerleave', leave);
       renderer.domElement.removeEventListener('pointerup', end);
       renderer.domElement.removeEventListener('pointercancel', end);
       renderer.domElement.removeEventListener('lostpointercapture', end);
@@ -315,7 +352,7 @@ export default function SkinView(props: Props) {
     const ctx = c.getContext('2d')!;
     ctx.clearRect(0, 0, 768, 768);
     const regs = atlas(skin.model);
-    if (grid) {
+    if (grid && hovered) {
       for (const r of regs.filter((r) => r.layer === view.layer)) {
         ctx.strokeStyle =
           view.layer === 'overlay'
@@ -356,7 +393,7 @@ export default function SkinView(props: Props) {
       ctx.fillRect((i % 64) * 12, Math.floor(i / 64) * 12, 12, 12);
     s.hints.needsUpdate = true;
     s.render();
-  }, [skin.model, view.layer, grid, mask, selected]);
+  }, [skin.model, view.layer, grid, hovered, mask, selected]);
   return (
     <div
       ref={host}

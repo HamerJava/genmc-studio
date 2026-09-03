@@ -1,6 +1,6 @@
 'use client';
-import { useEffect, useRef } from 'react';
-import { atlas, type Layer } from '@/lib/skin/atlas';
+import { useEffect, useRef, useState } from 'react';
+import { atlas, regionAt, type Layer } from '@/lib/skin/atlas';
 import { pixelCanvas, type Skin } from '@/lib/skin/engine';
 export default function AtlasView({
   skin,
@@ -25,6 +25,8 @@ export default function AtlasView({
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const down = useRef(false);
+  const [hovered, setHovered] = useState(false);
+  useEffect(() => setHovered(false), [skin.model, layer]);
   useEffect(() => {
     const c = ref.current;
     if (!c) return;
@@ -36,7 +38,7 @@ export default function AtlasView({
     ctx.fillStyle = 'rgba(255,255,255,.55)';
     for (const r of regions.filter((r) => r.layer !== layer))
       ctx.fillRect(r.x * 12, r.y * 12, r.width * 12, r.height * 12);
-    if (grid)
+    if (grid && hovered)
       for (const r of regions.filter((r) => r.layer === layer)) {
         ctx.strokeStyle =
           layer === 'overlay' ? 'rgba(137,105,193,.35)' : 'rgba(53,99,85,.25)';
@@ -84,7 +86,19 @@ export default function AtlasView({
         selected.height * 12,
       );
     }
-  }, [skin, selected, labels, grid, layer, mask]);
+  }, [skin, selected, labels, grid, hovered, layer, mask]);
+  function hover(e: React.PointerEvent) {
+    const b = e.currentTarget.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - b.left) / b.width) * 64);
+    const y = Math.floor(((e.clientY - b.top) / b.height) * 64);
+    setHovered(
+      x >= 0 &&
+        x < 64 &&
+        y >= 0 &&
+        y < 64 &&
+        regionAt(skin.model, x, y)?.layer === layer,
+    );
+  }
   function point(e: React.PointerEvent) {
     const b = e.currentTarget.getBoundingClientRect();
     onPixel(
@@ -105,20 +119,26 @@ export default function AtlasView({
         width={768}
         height={768}
         aria-label="64 by 64 skin canvas"
+        onPointerEnter={hover}
+        onPointerLeave={() => setHovered(false)}
         onPointerDown={(e) => {
+          hover(e);
           down.current = true;
           onStart?.();
           e.currentTarget.setPointerCapture(e.pointerId);
           point(e);
         }}
         onPointerMove={(e) => {
+          hover(e);
           if (down.current) point(e);
         }}
-        onPointerUp={() => {
+        onPointerUp={(e) => {
+          if (e.pointerType === 'touch') setHovered(false);
           down.current = false;
           onEnd();
         }}
         onPointerCancel={() => {
+          setHovered(false);
           down.current = false;
           onEnd();
         }}
