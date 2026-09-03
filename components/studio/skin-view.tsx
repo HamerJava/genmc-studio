@@ -49,15 +49,6 @@ function pose(part: Part, v: View, phase: number) {
     if (arm) x = (left ? -1 : 1) * 0.65 * swing;
     if (leg) x = (left ? 1 : -1) * 0.65 * swing;
   }
-  if (v.pose === 'tpose' && arm) z = left ? Math.PI / 2 : -Math.PI / 2;
-  if (v.pose === 'wave' && part === 'right_arm') {
-    z = -2.5 + (v.animated ? Math.sin(phase * 5) * 0.3 : 0);
-    x = -0.2;
-  }
-  if (v.pose === 'sit' && leg)
-    x =
-      -Math.PI / 2 +
-      (v.animated ? Math.sin(phase * 2 + (left ? 0 : 1)) * 0.09 : 0);
   if (v.animated && part === 'head') y = Math.sin(phase * 1.2) * 0.08;
   if (v.animated && v.pose === 'stand' && arm)
     z = (left ? 1 : -1) * (0.04 + Math.sin(phase * 1.4) * 0.025);

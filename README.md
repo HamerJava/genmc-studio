@@ -25,7 +25,7 @@ npm run build
 ## Features
 
 - 64×64 Classic and Slim skins; 3D painting, 2D painting and selection.
-- Five poses with optional animation: standing, walk, T-pose, wave and sitting. Movement pauses during pointer interaction.
+- Standing and walking with optional animation in a compact control row. Movement pauses during pointer interaction.
 - Subtle green base grid and raised violet overlay grid, with an obvious layer switch.
 - Custom colors and saved palette, instruction text, rectangular context selection and mask pen.
 - Agent activity glow and persistent mixed-author history with filters and timeline navigation.

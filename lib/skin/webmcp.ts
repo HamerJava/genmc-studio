@@ -97,7 +97,7 @@ export function toolDefinitions(
         animated: { type: 'boolean' },
         pose: {
           type: 'string',
-          enum: ['stand', 'walk', 'tpose', 'wave', 'sit'],
+          enum: ['stand', 'walk'],
         },
         layer: { type: 'string', enum: ['base', 'overlay'] },
         mode: { type: 'string', enum: ['2d', '3d'] },

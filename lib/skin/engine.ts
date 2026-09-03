@@ -1,5 +1,5 @@
 import { atlas, regionAt, type Model, type Part, type Layer } from './atlas';
-export type Pose = 'stand' | 'walk' | 'tpose' | 'wave' | 'sit';
+export type Pose = 'stand' | 'walk';
 export type Skin = {
   pixels: string[];
   model: Model;

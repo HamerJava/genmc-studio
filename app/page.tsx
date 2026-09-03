@@ -74,11 +74,8 @@ const initialView: View = {
   showBase: true,
 };
 const poseLabels = {
-  stand: 'Standing',
-  walk: 'Walking',
-  tpose: 'T-pose',
-  wave: 'Wave',
-  sit: 'Sitting',
+  stand: 'Stand',
+  walk: 'Walk',
 };
 const swatches = [
   '#34473f',
@@ -834,21 +831,12 @@ export default function Home() {
               />
             )}
             <aside className="inspector">
-              <details open>
-                <summary>Pose</summary>
-                <button
-                  aria-label={
-                    view.animated ? 'Pause animation' : 'Play animation'
-                  }
-                  onClick={() => setView({ ...view, animated: !view.animated })}
-                >
-                  {view.animated ? <Pause size={14} /> : <Play size={14} />}{' '}
-                  {view.animated ? 'Pause' : 'Animate'}
-                </button>
+              <div className="pose-controls" role="group" aria-label="Pose">
                 {Object.entries(poseLabels).map(([p, label]) => (
                   <button
                     className={view.pose === p ? 'selected' : ''}
                     key={p}
+                    aria-pressed={view.pose === p}
                     onClick={() =>
                       setView({ ...view, pose: p as View['pose'] })
                     }
@@ -856,7 +844,17 @@ export default function Home() {
                     {label}
                   </button>
                 ))}
-              </details>
+                <button
+                  className="pose-play"
+                  aria-label={
+                    view.animated ? 'Pause animation' : 'Play animation'
+                  }
+                  title={view.animated ? 'Pause animation' : 'Play animation'}
+                  onClick={() => setView({ ...view, animated: !view.animated })}
+                >
+                  {view.animated ? <Pause size={13} /> : <Play size={13} />}
+                </button>
+              </div>
               <details open>
                 <summary>Color</summary>
                 <div className="swatches">
