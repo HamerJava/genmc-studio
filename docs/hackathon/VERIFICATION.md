@@ -16,7 +16,7 @@
 ## Limits
 
 - No actual Minecraft client round-trip was tested; PNG validity and internal UV correspondence were tested.
-- Java profile providers can reject datacenter traffic or be unavailable. The UI reports this without inferring whether a skin is AI-generated. The service uses official Minecraft Services with Mojang fallback.
+- Java profile providers can reject datacenter traffic or be unavailable. The UI reports this without inferring whether a skin is AI-generated. The service uses official Minecraft Services and Mojang, with the documented public Ashcon profile cache as a labeled fallback.
 - Draft is one anonymous browser-session document; concurrent multi-tab editing is not coordinated server-side. Clearing the browser cookie loses access.
 - Marker is removable and forgeable; it is only an export-origin hint.
 - Demo is a narrated walkthrough assembled from actual public app captures and verified native tool actions, not an uncut screen recording. Voice is synthetic. Video has English subtitles.

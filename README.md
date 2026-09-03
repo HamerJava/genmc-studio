@@ -50,7 +50,7 @@ Sites provisions the logical `DB` D1 and `SKINS` R2 bindings in `.openai/hosting
 
 ## Marker limits
 
-GenMC v1 repeats an eight-byte marker three times in the blue-channel least-significant bit of canonical base pixels. Each changed blue value differs by at most one. Detection uses bitwise majority. It is removable, forgeable and copyable: neither a match nor absence proves whether AI created a skin. It is not Google SynthID, a cryptographic signature, or a claim of authorship. Minecraft Java profile lookup may fail when upstream services are unavailable or a skin is legacy 64×32.
+GenMC v1 repeats an eight-byte marker three times in the blue-channel least-significant bit of canonical base pixels. Each changed blue value differs by at most one. Detection uses bitwise majority. It is removable, forgeable and copyable: neither a match nor absence proves whether AI created a skin. It is not Google SynthID, a cryptographic signature, or a claim of authorship. Player lookup first uses official Minecraft services, then the documented public Ashcon profile cache if official datacenter requests are rejected; cached results are labeled. Minecraft Java profile lookup may fail when upstream services are unavailable or a skin is legacy 64×32.
 
 ## Vision
 
