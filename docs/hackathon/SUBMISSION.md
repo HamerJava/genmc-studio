@@ -41,6 +41,8 @@ The vision is GenMC as a shared creative workspace for Minecraft: skins first, t
 
 Live URL: https://genmc-studio.kolio.chatgpt.site
 
+Public repository: https://github.com/HamerJava/genmc-studio
+
 Video: upload the supplied narrated MP4 to public YouTube and paste its URL into Devpost.
 
 Submission status: materials prepared; no Devpost submission or acceptance is implied. Confirm eligibility, deadline, team details, public repository URL and YouTube URL on the current submission form.
