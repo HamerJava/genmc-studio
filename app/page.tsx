@@ -1132,7 +1132,7 @@ export default function Home() {
               {mode === '3d'
                 ? tool === 'rotate'
                   ? 'Drag to rotate · Scroll to zoom'
-                  : 'Click or drag to edit · Rotate tool to orbit'
+                  : 'Drag on skin to edit · Drag outside to rotate'
                 : 'Pixel-perfect · Select a region for your agent'}
             </span>
             <button className="agent-status" onClick={() => setHelp(true)}>

@@ -64,14 +64,7 @@ function pose(part: Part, v: View, phase: number) {
   return [x, y, z] as const;
 }
 export default function SkinView(props: Props) {
-  const {
-    skin,
-    view,
-    paint = false,
-    grid = false,
-    mask = [],
-    selected,
-  } = props;
+  const { skin, view, grid = false, mask = [], selected } = props;
   const host = useRef<HTMLDivElement>(null);
   const latest = useRef(props);
   latest.current = props;
@@ -162,7 +155,7 @@ export default function SkinView(props: Props) {
     raf = requestAnimationFrame(tick);
     const pick = (e: PointerEvent) => {
       const s = state.current;
-      if (!s || s.controls.enabled) return;
+      if (!s) return;
       const rect = renderer.domElement.getBoundingClientRect();
       const ray = new T.Raycaster();
       ray.setFromCamera(
@@ -172,34 +165,50 @@ export default function SkinView(props: Props) {
         ),
         camera,
       );
-      const hit = ray
+      return ray
         .intersectObjects(s.meshes, false)
         .find(
           (h) =>
             h.object.visible &&
             h.object.userData.layer === latest.current.view.layer,
         );
+    };
+    const paintAt = (hit: ReturnType<typeof pick>) => {
       if (hit?.uv)
         latest.current.onPixel?.(
           Math.min(63, Math.max(0, Math.floor(hit.uv.x * 64))),
           Math.min(63, Math.max(0, Math.floor((1 - hit.uv.y) * 64))),
         );
     };
+    let activePointer: number | null = null;
+    let painting = false;
     const start = (e: PointerEvent) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || activePointer !== null) return;
+      const hit = latest.current.paint ? pick(e) : undefined;
+      activePointer = e.pointerId;
       down.current = true;
-      if (latest.current.paint) latest.current.onStart?.();
-      renderer.domElement.setPointerCapture(e.pointerId);
-      pick(e);
+      // Lock the gesture at its starting point before OrbitControls sees it.
+      // Crossing the model during an outside drag must never start a stroke.
+      painting = !!hit;
+      controls.enabled = !painting;
+      if (painting) {
+        latest.current.onStart?.();
+        renderer.domElement.setPointerCapture(e.pointerId);
+        paintAt(hit);
+      }
     };
     const move = (e: PointerEvent) => {
-      if (down.current) pick(e);
+      if (painting && e.pointerId === activePointer) paintAt(pick(e));
     };
-    const end = () => {
-      if (down.current && latest.current.paint) latest.current.onEnd?.();
+    const end = (e: PointerEvent) => {
+      if (e.pointerId !== activePointer) return;
+      if (painting) latest.current.onEnd?.();
+      activePointer = null;
+      painting = false;
       down.current = false;
+      controls.enabled = true;
     };
-    renderer.domElement.addEventListener('pointerdown', start);
+    renderer.domElement.addEventListener('pointerdown', start, true);
     renderer.domElement.addEventListener('pointermove', move);
     renderer.domElement.addEventListener('pointerup', end);
     renderer.domElement.addEventListener('pointercancel', end);
@@ -208,6 +217,12 @@ export default function SkinView(props: Props) {
       disposed = true;
       cancelAnimationFrame(raf);
       ro.disconnect();
+      renderer.domElement.removeEventListener('pointerdown', start, true);
+      renderer.domElement.removeEventListener('pointermove', move);
+      renderer.domElement.removeEventListener('pointerup', end);
+      renderer.domElement.removeEventListener('pointercancel', end);
+      renderer.domElement.removeEventListener('lostpointercapture', end);
+      down.current = false;
       controls.dispose();
       clear(root);
       texture.dispose();
@@ -217,12 +232,6 @@ export default function SkinView(props: Props) {
       state.current = null;
     };
   }, []);
-  useEffect(() => {
-    const s = state.current;
-    if (s) {
-      s.controls.enabled = !paint;
-    }
-  }, [paint]);
   useEffect(() => {
     const s = state.current;
     if (s) {
