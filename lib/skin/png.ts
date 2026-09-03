@@ -1,0 +1,3 @@
+import {pixelCanvas,type Skin} from './engine';
+export function pngData(s:Skin){return pixelCanvas(s.pixels).toDataURL('image/png')}
+export async function readPng(blob:Blob){if(blob.size>1024*1024)throw Error('PNG must be smaller than 1 MB');const image=await createImageBitmap(blob);if(image.width!==64||image.height!==64){image.close();throw Error('Use a modern 64 × 64 PNG skin')}const c=document.createElement('canvas');c.width=c.height=64;const ctx=c.getContext('2d')!;ctx.drawImage(image,0,0);image.close();const d=ctx.getImageData(0,0,64,64).data;return Array.from({length:4096},(_,i)=>'#'+Array.from(d.slice(i*4,i*4+4)).map(n=>n.toString(16).padStart(2,'0')).join(''));}
