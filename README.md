@@ -33,7 +33,6 @@ npm run build
 - Pencil, eraser (overlay only), pipette, face fill, rectangular selection, mirrored painting, undo and redo.
 - Persistent anonymous draft and public remix gallery backed by D1/R2.
 - Fourteen native WebMCP tools sharing the visible editor state and editing engine.
-- GenMC marker checker via PNG or Minecraft Java player name.
 
 ## Agent contract
 

@@ -46,7 +46,7 @@ import {
   type View,
   type Operation,
 } from '@/lib/skin/engine';
-import { markSkin, detectMarker } from '@/lib/skin/marker';
+import { markSkin } from '@/lib/skin/marker';
 import { pngData, readPng } from '@/lib/skin/png';
 import { toolDefinitions, registerTools } from '@/lib/skin/webmcp';
 import {
@@ -78,9 +78,7 @@ const poseLabels = {
   walk: 'Walk',
 };
 const swatches = [
-  '#34473f',
   '#71826c',
-  '#c6d2a8',
   '#e1b892',
   '#302f2b',
   '#faf7ee',
@@ -157,12 +155,9 @@ export default function Home() {
   const [publish, setPublish] = useState<Skin | null>(null);
   const [busy, setBusy] = useState(false);
   const [gallery, setGallery] = useState<any[]>([]);
-  const [player, setPlayer] = useState('');
-  const [result, setResult] = useState('');
   const [help, setHelp] = useState(false);
 
   const upload = useRef<HTMLInputElement>(null);
-  const checkUpload = useRef<HTMLInputElement>(null);
   const selectionStart = useRef<{
     x: number;
     y: number;
@@ -610,32 +605,6 @@ export default function Home() {
       setBusy(false);
     }
   }
-  async function inspect(blob: Blob, model: Model = 'classic', cached = false) {
-    try {
-      const pixels = await readPng(blob);
-      const found = detectMarker({ ...makeSkin(), pixels, model });
-      setResult(
-        (found.detected ? 'GenMC marker found' : 'No GenMC marker found') +
-          (cached ? ' · cached player skin' : ''),
-      );
-    } catch (e) {
-      setResult(`Unable to check: ${(e as Error).message}`);
-    }
-  }
-  async function inspectPlayer() {
-    setResult('Checking…');
-    try {
-      const r = await fetch(`/api/player?name=${encodeURIComponent(player)}`);
-      if (!r.ok) throw Error(((await r.json()) as { error: string }).error);
-      await inspect(
-        await r.blob(),
-        r.headers.get('X-Skin-Model') === 'slim' ? 'slim' : 'classic',
-        r.headers.get('X-Skin-Source') === 'public-cache',
-      );
-    } catch (e) {
-      setResult(`Unable to check: ${(e as Error).message}`);
-    }
-  }
   return (
     <main>
       {activity && <div className="agent-glow" aria-hidden="true" />}
@@ -647,7 +616,6 @@ export default function Home() {
           {[
             ['studio', 'Studio'],
             ['gallery', 'Gallery'],
-            ['origin', 'Check origin'],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -858,22 +826,7 @@ export default function Home() {
               <details open>
                 <summary>Color</summary>
                 <div className="swatches">
-                  {[
-                    ...new Set([
-                      ...swatches,
-                      '#ffffff',
-                      '#000000',
-                      '#ef4444',
-                      '#f97316',
-                      '#facc15',
-                      '#22c55e',
-                      '#06b6d4',
-                      '#3b82f6',
-                      '#8b5cf6',
-                      '#ec4899',
-                      ...context.palette,
-                    ]),
-                  ].map((c) => (
+                  {swatches.map((c) => (
                     <button
                       key={c}
                       style={{ background: c }}
@@ -882,6 +835,21 @@ export default function Home() {
                     />
                   ))}
                 </div>
+                {context.palette.length > 0 && (
+                  <details className="saved-colors">
+                    <summary>Saved colors</summary>
+                    <div className="swatches">
+                      {context.palette.map((c) => (
+                        <button
+                          key={c}
+                          style={{ background: c }}
+                          aria-label={`Use saved ${c}`}
+                          onClick={() => setColor(c)}
+                        />
+                      ))}
+                    </div>
+                  </details>
+                )}
                 <div className="custom-color">
                   <input
                     type="color"
@@ -1164,56 +1132,6 @@ export default function Home() {
               />
             ))}
           </div>
-        </section>
-      )}
-      {tab === 'origin' && (
-        <section className="origin-page">
-          <span className="eyebrow">GENMC ORIGIN CHECK</span>
-          <h1>
-            A small mark.
-            <br />A trace of where it began.
-          </h1>
-          <p>Check a Minecraft Java player or a 64 × 64 skin.</p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void inspectPlayer();
-            }}
-          >
-            <input
-              aria-label="Minecraft player name"
-              placeholder="Player name"
-              value={player}
-              onChange={(e) => setPlayer(e.target.value)}
-              maxLength={16}
-            />
-            <button className="primary">Check ↗</button>
-          </form>
-          <button
-            className="text-button"
-            onClick={() => checkUpload.current?.click()}
-          >
-            <Upload size={14} />
-            Or upload a PNG
-          </button>
-          <input
-            hidden
-            type="file"
-            accept="image/png"
-            ref={checkUpload}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void inspect(f);
-              e.target.value = '';
-            }}
-          />
-          <output className="check-result">{result}</output>
-          <p className="origin-note">
-            GenMC exports include a removable, copyable marker. A match is not
-            proof of AI generation or authorship. No match is not proof of human
-            creation. This is not Google SynthID. Player lookups may use a
-            public profile cache.
-          </p>
         </section>
       )}
       {notice && (

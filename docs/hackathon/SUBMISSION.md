@@ -20,7 +20,7 @@ The app registers fourteen imperative tools with `document.modelContext.register
 
 ## Trust and provenance
 
-Public exports carry a lightweight GenMC marker and retain template lineage. The marker is explicitly removable and forgeable. It is an origin hint, not universal AI detection, not proof of authorship, and not Google SynthID. Player-name checks support Minecraft Java skins.
+Public exports carry a lightweight GenMC marker and retain template lineage. The marker is explicitly removable and forgeable. It is an origin hint, not universal AI detection, not proof of authorship, and not Google SynthID.
 
 ## Built with
 
@@ -37,7 +37,7 @@ The vision is GenMC as a shared creative workspace for Minecraft: skins first, t
 3. Inspect the visible edit; undo and redo it.
 4. Select an arm in 3D, change pose or start animation, switch to the 2D map.
 5. Open Gallery and remix a starter. Publish only after reviewing the dialog.
-6. Export the PNG, then upload it in Check origin.
+6. Export the finished PNG with its GenMC marker.
 
 Live URL: https://genmc-studio.kolio.chatgpt.site
 
