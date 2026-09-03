@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'GenMC — Skin Studio',
+  title: 'genMC(P) — Skin Studio',
   description: 'A shared Minecraft skin studio for humans and agents. Create, pose and remix.',
 };
 

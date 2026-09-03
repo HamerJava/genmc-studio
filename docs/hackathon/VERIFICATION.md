@@ -26,3 +26,7 @@
 
 Current Devpost overview checked on 4 September 2026: https://webmcp.devpost.com/
 It displays 4 September 2026 at 1:00am PDT (10:00am Europe/Berlin). Older rules/resources differ; confirm the active form before submitting. A public YouTube demo under three minutes with audio, public source repository and live URL are required.
+
+## September 4 editor update
+
+Eight local automated tests pass, including sparse mixed-author history persistence and mask/context conflict checks. TypeScript and production build pass. Native local WebMCP retrieved a user-entered brief and a painted mask at body.overlay.bottom, performed an in-mask edit, rejected an out-of-mask edit, and read both agent and manual 3D stroke history. Undo/redo and draft reload retained the context and history. The live browser visually verified moving walk poses, agent edge glow, and the raised violet overlay grid. The previous demo video predates these additions.

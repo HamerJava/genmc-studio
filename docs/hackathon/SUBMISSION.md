@@ -10,13 +10,13 @@ As models improve at visual and spatial reasoning, creative tools need more than
 
 ## What it does
 
-People paint in 2D or directly on a 3D character, isolate body parts and clothing layers, inspect static poses, import/export skins, and remix public templates. An agent can read the exact current skin and selection, discover all 72 semantic face regions, and apply bounded, atomic edits. Human corrections and agent operations use the same editing engine. Changes can be undone, and publication requires reviewing a fixed snapshot.
+People paint in 2D or directly on a 3D character, isolate body parts and clothing layers, inspect static or animated poses, import/export skins, and remix public templates. An agent can read the exact current skin and selection, discover all 72 semantic face regions, and apply bounded, atomic edits. Human corrections and agent operations use the same editing engine. Changes can be undone, and publication requires reviewing a fixed snapshot.
 
 ## Why WebMCP
 
 A flat image alone does not tell an agent which pixels belong to the back of a slim left arm's outer sleeve. `get_uv_atlas` does. `get_skin_state` supplies current pixels and revision. `read_region` provides focused context. `apply_operations` edits semantic faces using local coordinates with conflict protection. This reduces brittle screen-coordinate guessing and makes precise collaboration possible.
 
-The app registers twelve imperative tools with `document.modelContext.registerTool`. Registration is feature-detected and scoped with AbortSignal. Tools share the React application's state and pure edit engine; they are not a disconnected demo endpoint. No model provider key is required by the website.
+The app registers fourteen imperative tools with `document.modelContext.registerTool`. Registration is feature-detected and scoped with AbortSignal. Tools share the React application's state and pure edit engine; they are not a disconnected demo endpoint. No model provider key is required by the website.
 
 ## Trust and provenance
 
@@ -35,7 +35,7 @@ The vision is GenMC as a shared creative workspace for Minecraft: skins first, t
 1. Open the live app in ChatGPT's WebMCP-enabled browser.
 2. Ask: "Read the current skin and its UV atlas. Add a small gold emblem to body.overlay.front. Preserve all other pixels."
 3. Inspect the visible edit; undo and redo it.
-4. Select an arm in 3D, change static pose, switch to the 2D map.
+4. Select an arm in 3D, change pose or start animation, switch to the 2D map.
 5. Open Gallery and remix a starter. Publish only after reviewing the dialog.
 6. Export the PNG, then upload it in Check origin.
 
