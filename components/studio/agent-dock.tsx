@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Sparkles, ArrowUp, X } from 'lucide-react';
+import { Sparkles, ArrowUp, X, Box, Scan, Pencil } from 'lucide-react';
 import type { EditContext } from '@/lib/skin/workspace';
 export type AgentCall = {
   id: number;
@@ -37,6 +37,9 @@ export default function AgentDock({
   connected,
   ready,
   hint,
+  marking,
+  markMethod,
+  onMark,
   onSend,
   onCancel,
   onClear,
@@ -49,6 +52,9 @@ export default function AgentDock({
   connected: boolean;
   ready: boolean;
   hint: string;
+  marking: boolean;
+  markMethod: string;
+  onMark: (method: string) => void;
   onSend: (text: string) => void;
   onCancel: (id: string) => void;
   onClear: () => void;
@@ -119,6 +125,11 @@ export default function AgentDock({
           send();
         }}
       >
+        <div className="composer-mark-tools" role="group" aria-label="Marking method">
+          {([['face', 'Mark a face', Box], ['rectangle', 'Mark a rectangle', Scan], ['freehand', 'Draw a mask', Pencil]] as const).map(([method, label, Icon]) => (
+            <button type="button" key={method} title={label} aria-label={label} aria-pressed={marking && markMethod === method} disabled={!ready} onClick={() => onMark(method)}><Icon size={14} /></button>
+          ))}
+        </div>
         <button
           type="button"
           className={`agent-orb ${current?.status === 'done' ? 'agent-call-finish' : ''}`}

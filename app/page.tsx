@@ -10,7 +10,6 @@ import {
   Grid2X2,
   Eraser,
   PaintBucket,
-  Scan,
   FlipHorizontal2,
   Sparkles,
   Play,
@@ -143,7 +142,7 @@ export default function Home() {
   const [view, setView] = useState<View>(initialView);
   const [mode, setMode] = useState('3d');
   const [tab, setTab] = useState('studio');
-  const [tool, setTool] = useState('select');
+  const [tool, setTool] = useState('pencil');
   const [markMethod, setMarkMethod] = useState('rectangle');
   const [color, setColor] = useState('#737373');
   const [mirror, setMirror] = useState(false);
@@ -357,7 +356,7 @@ export default function Home() {
     setChannel(new UserActionChannel()); lastDelivery.current = 0;
     setCalls([]); setAgentVisual(undefined); setPublish(null);
     setView(initialView); selectionStart.current = null;
-    setTool('select'); setTab('studio'); setSaved('Saved');
+    setTool('pencil'); setTab('studio'); setSaved('Saved');
   }
   async function persistCurrent() {
     const snapshot = { ...skinRef.current, sessionId: sessionRef.current, workspace: { context: contextRef.current, journal: journalRef.current } };
@@ -948,10 +947,6 @@ export default function Home() {
               Pixel grid
             </button>
           </div>
-          {tool === 'select' && <div className="mark-options">
-            <Seg label="Marking method" value={markMethod} onChange={(value) => { setMarkMethod(value); selectionStart.current = null; }} options={[[ 'face', 'Face', Box ], [ 'rectangle', 'Rectangle', Scan ], [ 'freehand', 'Freehand', Pencil ]]} />
-            <span>{markMethod === 'face' ? 'Click a face to mark it' : markMethod === 'rectangle' ? 'Drag to mark an area' : 'Draw to add · start on a mark to erase'}</span>
-          </div>}
           <div className={`workbench ${activity ? 'agent-painting' : ''}`}>
             {agentVisual && <div className={`agent-focus-status phase-${agentVisual.phase}`} role="status" aria-live="polite"><Sparkles size={16} /><span><strong>{agentVisual.label}</strong><small>{regionLabel(agentVisual.regions)}</small></span><span className="agent-phase">{agentVisual.phase === 'done' ? 'Complete' : agentVisual.phase === 'error' ? 'Failed' : 'Live'}</span></div>}
             <aside className="tools">
@@ -960,7 +955,6 @@ export default function Home() {
                 [Eraser, 'eraser', 'Eraser'],
                 [PaintBucket, 'fill', 'Fill face'],
                 null,
-                [Scan, 'select', 'Mark area'],
               ].map((entry: any, i) =>
                 !entry ? (
                   <div className="divider" key={i} />
@@ -1170,6 +1164,9 @@ export default function Home() {
             status={mcp}
             connected={mcp === 'Agent ready'}
             ready={ready}
+            marking={tool === 'select'}
+            markMethod={markMethod}
+            onMark={(method) => { setTool('select'); setMarkMethod(method); selectionStart.current = null; }}
             hint={
               mode === '3d'
                 ? 'Drag on the skin to edit · outside to rotate'

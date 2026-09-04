@@ -411,7 +411,25 @@ export default function SkinView(props: Props) {
           shader.vertexShader = 'varying float skinWorldY;\n' + shader.vertexShader;
           shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nskinWorldY = (modelMatrix * vec4(position, 1.0)).y;');
           shader.fragmentShader = 'varying float skinWorldY;\nuniform float scanHeight;\nuniform bool scanReduced;\n' + shader.fragmentShader;
-          shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', 'gl_FragColor.a *= scanReduced ? 0.22 : max(0.0, 1.0 - abs(skinWorldY - scanHeight) / 2.5);\n#include <dithering_fragment>');
+          shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', `
+            vec2 texel = floor(vMapUv * 64.0);
+            vec2 uvDx = dFdx(vMapUv), uvDy = dFdy(vMapUv);
+            float determinant = uvDx.x * uvDy.y - uvDx.y * uvDy.x;
+            vec2 heightGradient = vec2(0.0);
+            if (abs(determinant) > 0.000000000001) {
+              heightGradient = vec2(
+                dFdx(skinWorldY) * uvDy.y - dFdy(skinWorldY) * uvDx.y,
+                dFdy(skinWorldY) * uvDx.x - dFdx(skinWorldY) * uvDy.x
+              ) / determinant;
+            }
+            float pixelHeight = skinWorldY + dot(heightGradient, (texel + 0.5) / 64.0 - vMapUv);
+            float noise = fract(sin(dot(texel, vec2(12.9898, 78.233))) * 43758.5453);
+            float offset = (noise - 0.5) * 2.8;
+            float brightness = 0.45 + noise * 0.55;
+            float wave = max(0.0, 1.0 - abs(pixelHeight + offset - scanHeight) / 2.5);
+            gl_FragColor.a *= scanReduced ? 0.22 : wave * brightness;
+            #include <dithering_fragment>
+          `);
         };
         effectMesh.scale.copy(hint.scale).multiplyScalar(1.002);
         effectMesh.visible = mesh.visible;

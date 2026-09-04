@@ -1807,6 +1807,81 @@ blockquote,
   box-shadow: none;
   background: transparent;
 }
+.agent-focus-status {
+  right: auto;
+  max-width: calc(100% - 270px);
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ui-canvas) 88%, transparent);
+  color: #0369a1;
+  box-shadow: none;
+  overflow: hidden;
+}
+.agent-focus-status > svg {
+  width: 12px;
+  height: 12px;
+  color: #38bdf8;
+}
+.agent-focus-status strong {
+  font-size: 12px;
+  font-weight: 400;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.agent-focus-status > span { min-width: 0; }
+.agent-focus-status small,
+.agent-focus-status .agent-phase { display: none; }
+.notice {
+  padding: 6px 10px;
+  gap: 8px;
+  background: var(--ui-surface);
+  color: #0369a1;
+  box-shadow: none;
+  overflow: hidden;
+}
+.notice::after,
+.agent-focus-status.phase-done::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, #7dd3fc, transparent);
+  animation: message-read-sweep 1.2s ease-out both;
+}
+:root.dark .notice,
+:root.dark .agent-focus-status { color: #7dd3fc; }
+.composer-mark-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding-right: 6px;
+  border-right: 1px solid var(--ui-line);
+}
+.composer-mark-tools button {
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  color: var(--ui-muted-text);
+}
+.composer-mark-tools button[aria-pressed='true'] {
+  background: var(--ui-line);
+  color: var(--ui-ink);
+}
+@media (max-width: 720px) {
+  .workbench .agent-focus-status { left: 8px; right: auto; max-width: calc(100% - 16px); }
+  .composer-mark-tools { padding-right: 3px; gap: 0; }
+  .composer-mark-tools button { padding: 5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notice::after,
+  .agent-focus-status.phase-done::after { animation: none; }
+}
 @keyframes focus-spark {
   50% {
     opacity: 0.5;
