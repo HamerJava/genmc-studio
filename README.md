@@ -6,7 +6,7 @@ Live site: https://genmc-studio.kolio.chatgpt.site
 
 ## Run locally
 
-Requires Node.js 22.13+ and npm.
+Use Node.js **24.12.0** with npm **11.6.2**, matching the release validation and CI. The application engine minimum is Node.js 22.13, but older npm releases can reject the optional WASM dependency lock entries.
 
 ```sh
 npm ci
