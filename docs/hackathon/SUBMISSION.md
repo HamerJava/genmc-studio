@@ -16,7 +16,7 @@ People paint in 2D or directly on a 3D character, isolate body parts and clothin
 
 A flat image alone does not tell an agent which pixels belong to the back of a slim left arm's outer sleeve. `get_uv_atlas` does. `get_skin_state` supplies current pixels and revision. `read_region` provides focused context. `apply_operations` edits semantic faces using local coordinates with conflict protection. This reduces brittle screen-coordinate guessing and makes precise collaboration possible.
 
-The app registers fourteen imperative tools with `document.modelContext.registerTool`. Registration is feature-detected and scoped with AbortSignal. Tools share the React application's state and pure edit engine; they are not a disconnected demo endpoint. No model provider key is required by the website.
+The app registers fifteen imperative tools with `document.modelContext.registerTool`. Registration is feature-detected and scoped with AbortSignal. Tools share the React application's state and pure edit engine; they are not a disconnected demo endpoint. No model provider key is required by the website. A compact message queue attaches new user instructions and action events to tool responses. Read receipts show actual delivery. The agent can await `wait_for_user_action` to receive updates during the same turn; the page cannot interrupt model reasoning or start a new agent turn.
 
 ## Trust and provenance
 

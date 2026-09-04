@@ -1,6 +1,8 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
 import {
   Pencil,
   MousePointer2,
@@ -15,14 +17,13 @@ import {
   PaintBucket,
   Scan,
   FlipHorizontal2,
-  Check,
+  Eye,
+  EyeOff,
   ChevronRight,
   Sparkles,
   Play,
   Pause,
 } from 'lucide-react';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -62,6 +63,14 @@ import {
   type Author,
   type Selection,
 } from '@/lib/skin/workspace';
+import { skinPalette } from '@/lib/skin/palette';
+import {
+  enqueueMessage,
+  markMessagesRead,
+  UserActionChannel,
+  type UserAction,
+} from '@/lib/skin/inbox';
+import AgentDock, { type AgentCall } from '@/components/studio/agent-dock';
 import AtlasView from '@/components/studio/atlas-view';
 const SkinView = dynamic(() => import('@/components/studio/skin-view'), {
   ssr: false,
@@ -77,14 +86,6 @@ const poseLabels = {
   stand: 'Stand',
   walk: 'Walk',
 };
-const swatches = [
-  '#71826c',
-  '#e1b892',
-  '#302f2b',
-  '#faf7ee',
-  '#535e8b',
-  '#bc7990',
-];
 async function api(path: string, init?: RequestInit) {
   const r = await fetch(path, init);
   const d: any = await r.json();
@@ -94,6 +95,9 @@ async function api(path: string, init?: RequestInit) {
 export default function Home() {
   const [skin, setSkin] = useState<Skin>(() => makeSkin());
   const skinRef = useRef(skin);
+  const swatches = useMemo(() => skinPalette(skin), [skin.pixels, skin.model]);
+  const [channel] = useState(() => new UserActionChannel());
+  const lastDelivery = useRef(0);
   const [view, setView] = useState<View>(initialView);
   const [mode, setMode] = useState('3d');
   const [tab, setTab] = useState('studio');
@@ -104,7 +108,14 @@ export default function Home() {
   const [context, setContext] = useState<EditContext>(emptyContext);
   const contextRef = useRef(context);
   const selection = context.selection;
-  function updateContext(patch: Partial<EditContext>) {
+  function notifyAction(kind: UserAction['kind']) {
+    channel.publish({
+      kind,
+      skinRevision: skinRef.current.revision,
+      contextRevision: contextRef.current.revision,
+    });
+  }
+  function updateContext(patch: Partial<EditContext>, fromUser = true) {
     const next = {
       ...contextRef.current,
       ...patch,
@@ -112,9 +123,19 @@ export default function Home() {
     };
     contextRef.current = next;
     setContext(next);
+    if (fromUser)
+      notifyAction(
+        patch.messages
+          ? 'message'
+          : patch.mask
+            ? 'mask'
+            : 'selection' in patch
+              ? 'selection'
+              : 'context',
+      );
   }
-  function setSelection(selection?: Selection) {
-    updateContext({ selection });
+  function setSelection(selection?: Selection, fromUser = true) {
+    updateContext({ selection }, fromUser);
   }
   const [journal, setJournal] = useState<Journal>(emptyJournal);
   const journalRef = useRef(journal);
@@ -122,10 +143,36 @@ export default function Home() {
     journalRef.current = j;
     setJournal(j);
   }
-  const [historyFilter, setHistoryFilter] = useState('all');
   const [grid, setGrid] = useState(true);
-  const [activity, setActivity] = useState('');
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const [calls, setCalls] = useState<AgentCall[]>([]);
   const activityId = useRef(0);
+  const activity = calls.some(
+    (c) => c.status === 'running' && c.name !== 'wait_for_user_action',
+  );
+  const lastCompletedCall = calls
+    .filter((c) => c.status === 'done' && c.name !== 'wait_for_user_action')
+    .at(-1);
+  function sendMessage(text: string) {
+    const c = contextRef.current;
+    const messages = enqueueMessage(c.messages, {
+      id: crypto.randomUUID(),
+      text,
+      createdAt: Date.now(),
+      readAt: null,
+      skinRevision: skinRef.current.revision,
+      contextRevision: c.revision + 1,
+      selection: c.selection ? { ...c.selection } : undefined,
+      mask: [...c.mask],
+    });
+    updateContext({ messages, brief: text });
+  }
+  function cancelMessage(id: string) {
+    const messages = contextRef.current.messages.filter(
+      (m) => m.id !== id || m.readAt !== null,
+    );
+    updateContext({ messages, brief: messages.at(-1)?.text ?? '' });
+  }
   const stroke = useRef<Skin | null>(null);
   function startStroke() {
     selectionStart.current = null;
@@ -144,6 +191,7 @@ export default function Home() {
         ),
       );
       stroke.current = null;
+      notifyAction('edit');
     }
     selectionStart.current = null;
   }
@@ -164,7 +212,9 @@ export default function Home() {
     region: string;
   } | null>(null);
   const saveChain = useRef(Promise.resolve());
-  const runRef = useRef<(n: string, i: any) => any>(() => {});
+  const runRef = useRef<(n: string, i: any, signal?: AbortSignal) => any>(
+    () => {},
+  );
   function commit(
     next: Skin,
     record = true,
@@ -178,6 +228,7 @@ export default function Home() {
     skinRef.current = next;
     setSkin(next);
     setSaved('Saving…');
+    if (author === 'user' && !stroke.current) notifyAction('edit');
     return { revision: next.revision };
   }
   function edit(
@@ -197,12 +248,12 @@ export default function Home() {
       );
     return commit(next, true, author, label);
   }
-  function checkout(cursor: number) {
+  function checkout(cursor: number, author: Author = 'user') {
     const result = travel(journalRef.current, skinRef.current, cursor);
     updateJournal(result.journal);
-    return commit(result.skin, false);
+    return commit(result.skin, false, author);
   }
-  function history(which: 'undo' | 'redo') {
+  function history(which: 'undo' | 'redo', author: Author = 'user') {
     return checkout(
       Math.max(
         0,
@@ -211,6 +262,7 @@ export default function Home() {
           journalRef.current.cursor + (which === 'undo' ? -1 : 1),
         ),
       ),
+      author,
     );
   }
   function convert(model: Model, author: Author = 'user') {
@@ -232,7 +284,7 @@ export default function Home() {
       author,
       `Switch to ${model}`,
     );
-    setSelection(undefined);
+    setSelection(undefined, author === 'user');
   }
   async function readGallery(id: string) {
     if (/^starter-[0-2]$/.test(id))
@@ -253,7 +305,7 @@ export default function Home() {
       author,
       `Template: ${s.name}`,
     );
-    setSelection(undefined);
+    setSelection(undefined, author === 'user');
     setTab('studio');
   }
   async function loadGallery() {
@@ -264,7 +316,7 @@ export default function Home() {
       setNotice((e as Error).message);
     }
   }
-  runRef.current = async (name, input) => {
+  runRef.current = async (name, input, signal) => {
     const s = skinRef.current;
     if (
       stroke.current &&
@@ -274,12 +326,19 @@ export default function Home() {
         'get_edit_context',
         'read_history',
         'read_region',
+        'wait_for_user_action',
       ].includes(name)
     )
       throw Error('A user stroke is in progress. Retry after it ends.');
     switch (name) {
       case 'get_skin_state':
         return { ...s, selection: selection ?? null, view, mode };
+      case 'wait_for_user_action':
+        return await channel.wait(
+          input.afterVersion,
+          input.timeoutMs ?? 15000,
+          signal,
+        );
       case 'get_edit_context':
         return describeContext(contextRef.current, s.model);
       case 'read_history':
@@ -333,7 +392,7 @@ export default function Home() {
       case 'set_selection': {
         const r = atlas(s.model).find((r) => r.id === input.region);
         if (!r) throw Error('Unknown region');
-        setSelection({ ...r, region: r.id });
+        setSelection({ ...r, region: r.id }, false);
         setView((v) => ({ ...v, layer: r.layer }));
         return { selection: r };
       }
@@ -364,9 +423,9 @@ export default function Home() {
         return { updated: true };
       }
       case 'undo':
-        return history('undo');
+        return history('undo', 'agent');
       case 'redo':
-        return history('redo');
+        return history('redo', 'agent');
       case 'list_skins':
         return {
           starters: [0, 1, 2].map((i) => ({
@@ -445,26 +504,74 @@ export default function Home() {
   useEffect(() => {
     const lifecycle = new AbortController();
     registerTools(
-      toolDefinitions(async (n, i) => {
+      toolDefinitions(async (n, i, signal) => {
         if (
           !readyRef.current &&
           !['get_uv_atlas', 'get_skin_state'].includes(n)
         )
           throw Error('Draft is still loading');
         const id = ++activityId.current;
-        setActivity(`Agent · ${n.replaceAll('_', ' ')}`);
+        setCalls((c) => [
+          ...c
+            .filter((x) => x.status === 'running')
+            .concat(c.filter((x) => x.status !== 'running').slice(-11)),
+          { id, name: n, status: 'running', startedAt: Date.now() },
+        ]);
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         );
         try {
-          return await runRef.current(n, i);
+          const result = await runRef.current(
+            n,
+            i,
+            signal
+              ? AbortSignal.any([signal, lifecycle.signal])
+              : lifecycle.signal,
+          );
+          if (lifecycle.signal.aborted || signal?.aborted)
+            throw Error('Agent call cancelled');
+          const c = contextRef.current;
+          const pending = c.messages.filter((m) => m.readAt === null);
+          const deliveredAt = Date.now();
+          const userUpdates = {
+            ...channel.snapshot(lastDelivery.current),
+            skinRevision: skinRef.current.revision,
+            contextRevision: c.revision,
+            messages: pending.map((m) => ({ ...m, readAt: deliveredAt })),
+            delivery:
+              'Returned by this tool; not a background interruption. Re-read get_edit_context before editing after new user actions.',
+          };
+          if (pending.length) {
+            const next = {
+              ...c,
+              messages: markMessagesRead(
+                c.messages,
+                pending.map((m) => m.id),
+                deliveredAt,
+              ),
+            };
+            contextRef.current = next;
+            setContext(next);
+          }
+          lastDelivery.current = channel.version;
+          setCalls((c) =>
+            c.map((call) =>
+              call.id === id
+                ? { ...call, status: 'done', endedAt: Date.now() }
+                : call,
+            ),
+          );
+          return { ...result, userUpdates };
         } catch (e) {
+          setCalls((c) =>
+            c.map((call) =>
+              call.id === id
+                ? { ...call, status: 'error', endedAt: Date.now() }
+                : call,
+            ),
+          );
           setNotice((e as Error).message);
           throw e;
-        } finally {
-          setTimeout(() => {
-            if (activityId.current === id) setActivity('');
-          }, 1200);
         }
       }),
       lifecycle.signal,
@@ -723,7 +830,18 @@ export default function Home() {
               <Switch size="sm" checked={grid} onCheckedChange={setGrid} />
             </label>
           </div>
-          <div className="workbench">
+          <div className={`workbench ${activity ? 'agent-painting' : ''}`}>
+            {activity ? (
+              <div className="agent-scan" aria-hidden="true" />
+            ) : (
+              lastCompletedCall && (
+                <div
+                  key={lastCompletedCall.id}
+                  className="agent-scan agent-echo"
+                  aria-hidden="true"
+                />
+              )
+            )}
             <aside className="tools">
               {[
                 [MousePointer2, 'rotate', 'Rotate'],
@@ -969,66 +1087,19 @@ export default function Home() {
               )}
             </aside>
           </div>
-          <div className="collaboration-panel">
-            <section className="agent-context">
-              <div className="panel-heading">
-                <h2>For your agent</h2>
-                <span
-                  role="status"
-                  className={activity ? 'agent-active' : 'muted'}
-                >
-                  {activity || 'Shared editing context'}
-                </span>
-              </div>
-              <textarea
-                aria-label="Instructions for agent"
-                placeholder="What should change? Your agent can read this."
-                maxLength={4000}
-                value={context.brief}
-                onChange={(e) => updateContext({ brief: e.target.value })}
-              />
-              <div className="context-actions">
-                <button
-                  className={tool === 'select' ? 'selected' : ''}
-                  onClick={() => setTool('select')}
-                >
-                  <Scan size={14} />
-                  Select area
-                </button>
-                <button
-                  className={tool === 'mask' ? 'selected' : ''}
-                  onClick={() => setTool('mask')}
-                >
-                  <Sparkles size={14} />
-                  Mask pen
-                </button>
-                <button
-                  disabled={!selection && !context.mask.length}
-                  onClick={() =>
-                    updateContext({ selection: undefined, mask: [] })
-                  }
-                >
-                  Clear marks
-                </button>
-              </div>
-              <p className="muted">
-                {context.mask.length
-                  ? `${context.mask.length} masked pixels · mask takes priority`
-                  : selection
-                    ? `${selection.width} × ${selection.height} · ${selection.region}`
-                    : 'Drag on the skin to select or mark pixels.'}
-              </p>
-              <label className="setting">
-                Keep agent paint inside marks
-                <Switch
-                  size="sm"
-                  checked={context.limitToContext}
-                  onCheckedChange={(limitToContext) =>
-                    updateContext({ limitToContext })
-                  }
-                />
-              </label>
-            </section>
+          <AgentDock
+            context={context}
+            calls={calls}
+            connected={mcp === 'Agent ready'}
+            ready={ready}
+            tool={tool}
+            onTool={setTool}
+            onSend={sendMessage}
+            onCancel={cancelMessage}
+            onClear={() => updateContext({ selection: undefined, mask: [] })}
+            onScope={(limitToContext) => updateContext({ limitToContext })}
+            historyCount={journal.entries.length}
+          >
             <section className="edit-history">
               <div className="panel-heading">
                 <h2>History</h2>
@@ -1092,7 +1163,7 @@ export default function Home() {
                 )}
               </div>
             </section>
-          </div>
+          </AgentDock>
           <footer>
             <span>
               {mode === '3d'

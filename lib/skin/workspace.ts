@@ -1,3 +1,4 @@
+import { validateMessages, type AgentMessage } from './inbox';
 import { atlas, regionAt, type Model } from './atlas';
 import type { Skin } from './engine';
 export type Selection = {
@@ -9,6 +10,7 @@ export type Selection = {
 };
 export type EditContext = {
   brief: string;
+  messages: AgentMessage[];
   revision: number;
   selection?: Selection;
   mask: number[];
@@ -29,6 +31,7 @@ export type Change = {
 export type Journal = { entries: Change[]; cursor: number };
 export const emptyContext: EditContext = {
   brief: '',
+  messages: [],
   revision: 0,
   mask: [],
   palette: [],
@@ -112,6 +115,7 @@ export function describeContext(c: EditContext, model: Model) {
   const selected = new Set(indices);
   return {
     ...c,
+    messages: undefined,
     mask: c.mask.map((i) => ({ x: i % 64, y: Math.floor(i / 64) })),
     scope: c.mask.length ? 'mask' : c.selection ? 'selection' : 'whole_skin',
     regions: atlas(model)
@@ -133,7 +137,10 @@ export function enforceContext(
   c: EditContext,
   expected?: number,
 ) {
-  if ((c.brief || c.selection || c.mask.length) && expected !== c.revision)
+  if (
+    (expected !== undefined || c.brief || c.selection || c.mask.length) &&
+    expected !== c.revision
+  )
     throw Error(
       `Context changed: read get_edit_context; expectedContextRevision must be ${c.revision}.`,
     );
@@ -225,5 +232,22 @@ export function validateWorkspace(raw: any): {
       )
         throw Error('Invalid history pixels');
   }
-  return { context: { ...c, mask: [...new Set(c.mask)] }, journal: j };
+  let messages = validateMessages(c.messages);
+  if (c.messages === undefined && c.brief.trim())
+    messages = [
+      {
+        id: 'legacy-brief',
+        text: c.brief,
+        createdAt: Date.now(),
+        readAt: null,
+        skinRevision: 0,
+        contextRevision: c.revision,
+        selection: c.selection,
+        mask: [...c.mask],
+      },
+    ];
+  return {
+    context: { ...c, messages, mask: [...new Set(c.mask)] },
+    journal: j,
+  };
 }

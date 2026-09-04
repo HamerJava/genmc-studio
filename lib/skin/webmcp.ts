@@ -3,7 +3,7 @@ export type Tool = {
   description: string;
   inputSchema: object;
   annotations: { readOnlyHint: boolean; untrustedContentHint: boolean };
-  execute: (input: any) => Promise<unknown>;
+  execute: (input: any, client?: { signal?: AbortSignal }) => Promise<unknown>;
 };
 const object = (properties: object = {}, required: string[] = []) => ({
   type: 'object',
@@ -14,7 +14,7 @@ const object = (properties: object = {}, required: string[] = []) => ({
 const string = { type: 'string' },
   integer = { type: 'integer', minimum: 0 };
 export function toolDefinitions(
-  run: (name: string, input: any) => unknown,
+  run: (name: string, input: any, signal?: AbortSignal) => unknown,
 ): Tool[] {
   const defs: [string, string, object, boolean][] = [
     [
@@ -27,6 +27,18 @@ export function toolDefinitions(
       'get_edit_context',
       'Read the user instruction text, mask, selection, semantic regions and context revision before editing. Mask pixels are extra context, never texture pixels.',
       object(),
+      true,
+    ],
+    [
+      'wait_for_user_action',
+      'Wait up to 15 seconds for a queued user message, changed mask/selection or manual skin edit during this turn. Pass userUpdates.version from your last response. Returns immediately on change, with current context revision and queued messages. This does not interrupt model reasoning or start an agent. Use after finishing a batch when collaborating live.',
+      object(
+        {
+          afterVersion: integer,
+          timeoutMs: { type: 'integer', minimum: 0, maximum: 15000 },
+        },
+        ['afterVersion'],
+      ),
       true,
     ],
     [
@@ -148,14 +160,17 @@ export function toolDefinitions(
   ];
   return defs.map(([name, description, inputSchema, readOnlyHint]) => ({
     name,
-    description,
+    description:
+      description +
+      ' Every response includes userUpdates with new user actions and queued messages; inspect these before your next edit. Messages returned in a tool response receive a visible Read receipt.',
     inputSchema,
     annotations: {
       readOnlyHint,
-      untrustedContentHint: name.includes('skin') || name.includes('gallery') || name==='get_edit_context' || name==='read_history',
+      // Every tool can return user-authored messages in userUpdates.
+      untrustedContentHint: true,
     },
-    execute: async (input) => {
-      const result = await run(name, input ?? {});
+    execute: async (input, client) => {
+      const result = await run(name, input ?? {}, client?.signal);
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );

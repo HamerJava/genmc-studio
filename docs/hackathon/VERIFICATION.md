@@ -30,3 +30,9 @@ It displays 4 September 2026 at 1:00am PDT (10:00am Europe/Berlin). Older rules/
 ## September 4 editor update
 
 Eight local automated tests pass, including sparse mixed-author history persistence and mask/context conflict checks. TypeScript and production build pass. Native local WebMCP retrieved a user-entered brief and a painted mask at body.overlay.bottom, performed an in-mask edit, rejected an out-of-mask edit, and read both agent and manual 3D stroke history. Undo/redo and draft reload retained the context and history. The live browser visually verified moving walk poses, agent edge glow, and the raised violet overlay grid. The previous demo video predates these additions.
+
+## Agent inbox and live palette (2026-09-04)
+
+Twelve automated tests pass, covering message-specific delivery receipts, queue limits, waiter wake/timeout/abort, draft migration, real skin colors, UV coordinates, revision conflicts and persistence. The isolated release type-checks. Native WebMCP in the local browser delivered a queued message with its context revision, applied a six-pixel mint chest badge and updated the six color presets. Read and Queued states survived a draft reload. The compact dock was inspected on desktop and at 390×844; mobile document width matched the viewport.
+
+A native 15-second wait returned successfully on timeout, and a native wait returned a newly queued message when its action cursor was behind. Waking an already pending wait is covered by the automated channel test. This browser automation serialized page interactions while the native call was pending, so that exact simultaneous UI flow is not claimed as end-to-end proven. The app uses real native tool execution, never an injected mock. Scan feedback is tied to actual calls and includes a brief completion trail for fast calls. Read is a tool-response delivery receipt, not evidence of model understanding or completed work. The existing video predates the inbox UI.
