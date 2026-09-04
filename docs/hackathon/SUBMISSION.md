@@ -8,6 +8,10 @@ A Minecraft skin studio where people and agents work on the same pixels, with th
 
 As models improve at visual and spatial reasoning, creative tools need more than a prompt box. They need a common workspace. A Minecraft skin is a surprisingly useful starting point: just 64 by 64 pixels, but wrapped around a body with multiple sides and a second clothing layer. GenMC gives both humans and agents the same precise map.
 
+That same workspace could also become a benchmark for spatial reasoning. A model could be asked to continue a stripe around an arm, align a pattern across adjacent faces, or modify an outer sleeve while preserving the skin underneath. The fixed 2D-to-3D mapping makes these tasks small, repeatable and inspectable: we could measure target-region accuracy, continuity across face boundaries and unintended changes to other pixels.
+
+Our motivation is to make improvements in visual and spatial reasoning observable through concrete creative tasks. Comparisons would hold starting skins, prompts, visual inputs and tool access constant, and distinguish following explicit UV coordinates from inferring spatial relationships across views. A standardized evaluation suite and comparative model results are future work; the studio provides the shared workspace on which to build them.
+
 ## What it does
 
 People paint in 2D or directly on a 3D character, isolate body parts and clothing layers, inspect static or animated poses, import/export skins, and remix public templates. An agent can read the exact current skin and selection, discover all 72 semantic face regions, and apply bounded, atomic edits. Human corrections and agent operations use the same editing engine. Changes can be undone, and publication requires reviewing a fixed snapshot.
