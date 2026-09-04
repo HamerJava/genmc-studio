@@ -900,9 +900,11 @@ export default function Home() {
               })}
             </div>
             <span>
-              {view.layer === 'base'
-                ? 'Solid skin · green grid'
-                : 'Raised overlay · violet grid'}
+              {mode === '2d'
+                ? 'Shared 64 × 64 grid'
+                : view.layer === 'base'
+                  ? 'Solid skin · green 3D grid'
+                  : 'Raised overlay · violet 3D grid'}
             </span>
             <label className="setting">
               Pixel grid{' '}
@@ -1043,7 +1045,6 @@ export default function Home() {
                     selected={selection}
                     labels={labels}
                     grid={grid}
-                    layer={view.layer}
                     mask={context.mask}
                     colorMatches={colorMatches}
                     onStart={startStroke}

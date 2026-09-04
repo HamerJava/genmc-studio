@@ -28,7 +28,7 @@ npm run build
 - Selected-color pixels are outlined in both previews and counted, without altering the skin. Split stacks vertically on small screens.
 - Direct body-map visibility controls: click to hide, Shift-click to isolate, Show all to restore. Separate eyes control base and outer layers.
 - Standing and walking with optional animation in a compact control row. Movement pauses during pointer interaction.
-- Subtle green base grid and raised violet overlay grid, with an obvious layer switch.
+- Subtle green base grid and raised violet overlay grid in 3D. The 2D atlas uses one neutral 64×64 grid for both layers, shown on hover; both layers retain their original colors.
 - Six presets extracted from the active skin, updated after edits, imports, templates and undo; custom colors remain available.
 - Compact agent input bar with queued messages, delivery receipts, one Mark area tool with Rectangle and Freehand methods. Freehand can add to or erase from a rectangle; a new rectangle replaces the previous marks.
 - Live tool activity, scan/glow feedback and persistent mixed-author history with filters and timeline navigation.

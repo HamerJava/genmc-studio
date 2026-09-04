@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { atlas, regionAt, type Layer } from '@/lib/skin/atlas';
+import { atlas, regionAt } from '@/lib/skin/atlas';
 import { drawColorHighlights } from '@/lib/skin/color-highlight';
 import { pixelCanvas, type Skin } from '@/lib/skin/engine';
 export default function AtlasView({
@@ -11,7 +11,6 @@ export default function AtlasView({
   onEnd,
   onStart,
   grid = false,
-  layer = 'base',
   mask = [],
   colorMatches = [],
 }: {
@@ -22,14 +21,13 @@ export default function AtlasView({
   onEnd: () => void;
   onStart?: () => void;
   grid?: boolean;
-  layer?: Layer;
   mask?: number[];
   colorMatches?: number[];
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const down = useRef(false);
   const [hovered, setHovered] = useState(false);
-  useEffect(() => setHovered(false), [skin.model, layer]);
+  useEffect(() => setHovered(false), [skin.model]);
   useEffect(() => {
     const c = ref.current;
     if (!c) return;
@@ -37,26 +35,19 @@ export default function AtlasView({
     ctx.clearRect(0, 0, 768, 768);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(pixelCanvas(skin.pixels), 0, 0, 768, 768);
-    const regions = atlas(skin.model);
-    ctx.fillStyle = 'rgba(255,255,255,.55)';
-    for (const r of regions.filter((r) => r.layer !== layer))
-      ctx.fillRect(r.x * 12, r.y * 12, r.width * 12, r.height * 12);
-    if (grid && hovered)
-      for (const r of regions.filter((r) => r.layer === layer)) {
-        ctx.strokeStyle =
-          layer === 'overlay' ? 'rgba(137,105,193,.35)' : 'rgba(53,99,85,.25)';
-        ctx.lineWidth = 0.75;
-        ctx.beginPath();
-        for (let x = 0; x <= r.width; x++) {
-          ctx.moveTo((r.x + x) * 12 + 0.5, r.y * 12);
-          ctx.lineTo((r.x + x) * 12 + 0.5, (r.y + r.height) * 12);
-        }
-        for (let y = 0; y <= r.height; y++) {
-          ctx.moveTo(r.x * 12, (r.y + y) * 12 + 0.5);
-          ctx.lineTo((r.x + r.width) * 12, (r.y + y) * 12 + 0.5);
-        }
-        ctx.stroke();
+    if (grid && hovered) {
+      ctx.strokeStyle = 'rgba(40,48,44,.25)';
+      ctx.lineWidth = 0.75;
+      ctx.beginPath();
+      for (let i = 0; i <= 64; i++) {
+        const p = i * 12 + 0.5;
+        ctx.moveTo(p, 0);
+        ctx.lineTo(p, 768);
+        ctx.moveTo(0, p);
+        ctx.lineTo(768, p);
       }
+      ctx.stroke();
+    }
     ctx.fillStyle = 'rgba(110,112,245,.48)';
     for (const i of mask)
       ctx.fillRect((i % 64) * 12, Math.floor(i / 64) * 12, 12, 12);
@@ -90,7 +81,7 @@ export default function AtlasView({
         selected.height * 12,
       );
     }
-  }, [skin, selected, labels, grid, hovered, layer, mask, colorMatches]);
+  }, [skin, selected, labels, grid, hovered, mask, colorMatches]);
   function hover(e: React.PointerEvent) {
     const b = e.currentTarget.getBoundingClientRect();
     const x = Math.floor(((e.clientX - b.left) / b.width) * 64);
@@ -100,7 +91,7 @@ export default function AtlasView({
         x < 64 &&
         y >= 0 &&
         y < 64 &&
-        regionAt(skin.model, x, y)?.layer === layer,
+        !!regionAt(skin.model, x, y),
     );
   }
   function point(e: React.PointerEvent) {
