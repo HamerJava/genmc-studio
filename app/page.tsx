@@ -12,6 +12,7 @@ import {
   Upload,
   Box,
   Grid2X2,
+  Columns2,
   Eraser,
   Pipette,
   PaintBucket,
@@ -64,6 +65,8 @@ import {
   type Author,
   type Selection,
 } from '@/lib/skin/workspace';
+import VisibilityControls from '@/components/studio/visibility-controls';
+import { colorPixels } from '@/lib/skin/color-highlight';
 import { skinPalette } from '@/lib/skin/palette';
 import {
   enqueueMessage,
@@ -108,6 +111,10 @@ export default function Home() {
   );
   const [eraseMarks, setEraseMarks] = useState(false);
   const [color, setColor] = useState('#71826c');
+  const colorMatches = useMemo(
+    () => colorPixels(skin, color),
+    [skin.pixels, skin.model, color],
+  );
   const [mirror, setMirror] = useState(false);
   const [labels, setLabels] = useState(false);
   const [context, setContext] = useState<EditContext>(emptyContext);
@@ -337,7 +344,14 @@ export default function Home() {
       throw Error('A user stroke is in progress. Retry after it ends.');
     switch (name) {
       case 'get_skin_state':
-        return { ...s, selection: selection ?? null, view, mode };
+        return {
+          ...s,
+          selection: selection ?? null,
+          view,
+          mode,
+          activeColor: color,
+          colorMatchCount: colorMatches.length,
+        };
       case 'wait_for_user_action':
         return await channel.wait(
           input.afterVersion,
@@ -405,8 +419,17 @@ export default function Home() {
         if (
           (input.pose && !Object.keys(poseLabels).includes(input.pose)) ||
           (input.layer && !['base', 'overlay'].includes(input.layer)) ||
-          (input.mode && !['2d', '3d'].includes(input.mode)) ||
-          (input.model && !['classic', 'slim'].includes(input.model))
+          (input.mode && !['2d', '3d', 'split'].includes(input.mode)) ||
+          (input.model && !['classic', 'slim'].includes(input.model)) ||
+          (input.color !== undefined &&
+            (typeof input.color !== 'string' ||
+              !/^#[0-9a-f]{6}$/i.test(input.color))) ||
+          (input.visibleParts !== undefined &&
+            (!Array.isArray(input.visibleParts) ||
+              input.visibleParts.some((p: any) => !parts.includes(p)))) ||
+          ['showBase', 'showOverlay'].some(
+            (k) => input[k] !== undefined && typeof input[k] !== 'boolean',
+          )
         )
           throw Error('Invalid view');
         if (input.model) {
@@ -423,8 +446,22 @@ export default function Home() {
             ? { animated: input.animated }
             : {}),
           ...(input.layer ? { layer: input.layer } : {}),
+          ...(input.visibleParts
+            ? {
+                visible: Object.fromEntries(
+                  parts.map((p) => [p, input.visibleParts.includes(p)]),
+                ) as View['visible'],
+              }
+            : {}),
+          ...(typeof input.showBase === 'boolean'
+            ? { showBase: input.showBase }
+            : {}),
+          ...(typeof input.showOverlay === 'boolean'
+            ? { showOverlay: input.showOverlay }
+            : {}),
         }));
         if (input.mode) setMode(input.mode);
+        if (input.color) setColor(input.color.toLowerCase());
         return { updated: true };
       }
       case 'undo':
@@ -460,6 +497,7 @@ export default function Home() {
         if (!active) return;
         if (d.skin) {
           const s = validateSkin(d.skin);
+          setColor(skinPalette(s)[0] ?? '#71826c');
           const workspace = validateWorkspace(d.skin.workspace);
           contextRef.current = workspace.context;
           setContext(workspace.context);
@@ -811,25 +849,56 @@ export default function Home() {
                   <Grid2X2 />
                   2D
                 </TabsTrigger>
+                <TabsTrigger value="split">
+                  <Columns2 />
+                  Split
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
           <div className={`layer-bar ${view.layer}`}>
-            <Tabs
-              value={view.layer}
-              onValueChange={(v) =>
-                setView({
-                  ...view,
-                  layer: v as View['layer'],
-                  [v === 'base' ? 'showBase' : 'showOverlay']: true,
-                })
-              }
+            <div
+              className="layer-picker"
+              role="group"
+              aria-label="Editing layer"
             >
-              <TabsList>
-                <TabsTrigger value="base">Base skin</TabsTrigger>
-                <TabsTrigger value="overlay">Outer layer</TabsTrigger>
-              </TabsList>
-            </Tabs>
+              {(['base', 'overlay'] as const).map((l) => {
+                const visible = l === 'base' ? view.showBase : view.showOverlay;
+                return (
+                  <div
+                    className={`layer-option ${view.layer === l ? 'active' : ''}`}
+                    key={l}
+                  >
+                    <button
+                      aria-pressed={view.layer === l}
+                      onClick={() =>
+                        setView({
+                          ...view,
+                          layer: l,
+                          [l === 'base' ? 'showBase' : 'showOverlay']: true,
+                        })
+                      }
+                    >
+                      {l === 'base' ? 'Base skin' : 'Outer layer'}
+                    </button>
+                    <button
+                      className="layer-eye"
+                      aria-pressed={visible}
+                      aria-label={`${visible ? 'Hide' : 'Show'} ${l === 'base' ? 'base skin' : 'outer layer'}`}
+                      title="Show or hide this layer in 3D"
+                      onClick={() =>
+                        setView({
+                          ...view,
+                          [l === 'base' ? 'showBase' : 'showOverlay']: !visible,
+                        })
+                      }
+                    >
+                      {visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
             <span>
               {view.layer === 'base'
                 ? 'Solid skin · green grid'
@@ -840,7 +909,9 @@ export default function Home() {
               <Switch size="sm" checked={grid} onCheckedChange={setGrid} />
             </label>
           </div>
-          <div className={`workbench ${activity ? 'agent-painting' : ''}`}>
+          <div
+            className={`workbench ${mode === 'split' ? 'has-split' : ''} ${activity ? 'agent-painting' : ''}`}
+          >
             {tool === 'mark' && (
               <div
                 className="mark-methods"
@@ -944,82 +1015,107 @@ export default function Home() {
                 aria-label="Paint color"
               />
             </aside>
-            {mode === '3d' ? (
-              <SkinView
-                skin={skin}
-                view={view}
-                paint={tool !== 'rotate'}
-                grid={grid}
-                mask={context.mask}
-                selected={selection}
-                onStart={startStroke}
-                onEnd={endStroke}
-                onPixel={pixel}
-              />
-            ) : (
-              <AtlasView
-                skin={skin}
-                selected={selection}
-                labels={labels}
-                grid={grid}
-                layer={view.layer}
-                mask={context.mask}
-                onStart={startStroke}
-                onPixel={pixel}
-                onEnd={endStroke}
-              />
-            )}
+            <div className={`preview-area ${mode === 'split' ? 'split' : ''}`}>
+              {mode !== '2d' && (
+                <div className="preview-pane preview-3d" key="3d">
+                  {mode === 'split' && <span className="pane-label">3D</span>}
+                  <SkinView
+                    skin={skin}
+                    view={view}
+                    paint={tool !== 'rotate'}
+                    grid={grid}
+                    mask={context.mask}
+                    selected={selection}
+                    colorMatches={colorMatches}
+                    onStart={startStroke}
+                    onEnd={endStroke}
+                    onPixel={pixel}
+                  />
+                </div>
+              )}
+              {mode !== '3d' && (
+                <div className="preview-pane preview-2d" key="2d">
+                  {mode === 'split' && (
+                    <span className="pane-label">UV · 64 × 64</span>
+                  )}
+                  <AtlasView
+                    skin={skin}
+                    selected={selection}
+                    labels={labels}
+                    grid={grid}
+                    layer={view.layer}
+                    mask={context.mask}
+                    colorMatches={colorMatches}
+                    onStart={startStroke}
+                    onPixel={pixel}
+                    onEnd={endStroke}
+                  />
+                </div>
+              )}
+            </div>
             <aside className="inspector">
-              <div className="pose-controls" role="group" aria-label="Pose">
-                {Object.entries(poseLabels).map(([p, label]) => (
+              {mode !== '2d' && (
+                <div className="pose-controls" role="group" aria-label="Pose">
+                  {Object.entries(poseLabels).map(([p, label]) => (
+                    <button
+                      className={view.pose === p ? 'selected' : ''}
+                      key={p}
+                      aria-pressed={view.pose === p}
+                      onClick={() =>
+                        setView({ ...view, pose: p as View['pose'] })
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
                   <button
-                    className={view.pose === p ? 'selected' : ''}
-                    key={p}
-                    aria-pressed={view.pose === p}
+                    className="pose-play"
+                    aria-label={
+                      view.animated ? 'Pause animation' : 'Play animation'
+                    }
+                    title={view.animated ? 'Pause animation' : 'Play animation'}
                     onClick={() =>
-                      setView({ ...view, pose: p as View['pose'] })
+                      setView({ ...view, animated: !view.animated })
                     }
                   >
-                    {label}
+                    {view.animated ? <Pause size={13} /> : <Play size={13} />}
                   </button>
-                ))}
-                <button
-                  className="pose-play"
-                  aria-label={
-                    view.animated ? 'Pause animation' : 'Play animation'
-                  }
-                  title={view.animated ? 'Pause animation' : 'Play animation'}
-                  onClick={() => setView({ ...view, animated: !view.animated })}
-                >
-                  {view.animated ? <Pause size={13} /> : <Play size={13} />}
-                </button>
-              </div>
-              <details open>
-                <summary>Color</summary>
+                </div>
+              )}
+              <section className="rail-group">
+                <div className="rail-heading">
+                  <span>Color</span>
+                  <small
+                    className="color-match-count"
+                    title="Pixels of the selected color, highlighted in both views"
+                    role="status"
+                  >
+                    {colorMatches.length} px
+                  </small>
+                </div>
                 <div className="swatches">
                   {swatches.map((c) => (
                     <button
                       key={c}
                       style={{ background: c }}
                       aria-label={`Use ${c}`}
+                      aria-pressed={color.toLowerCase() === c}
                       onClick={() => setColor(c)}
                     />
                   ))}
                 </div>
                 {context.palette.length > 0 && (
-                  <details className="saved-colors">
-                    <summary>Saved colors</summary>
-                    <div className="swatches">
-                      {context.palette.map((c) => (
-                        <button
-                          key={c}
-                          style={{ background: c }}
-                          aria-label={`Use saved ${c}`}
-                          onClick={() => setColor(c)}
-                        />
-                      ))}
-                    </div>
-                  </details>
+                  <div className="saved-swatch-row" aria-label="Saved colors">
+                    {context.palette.map((c) => (
+                      <button
+                        key={c}
+                        style={{ background: c }}
+                        aria-label={`Use saved ${c}`}
+                        aria-pressed={color.toLowerCase() === c.toLowerCase()}
+                        onClick={() => setColor(c)}
+                      />
+                    ))}
+                  </div>
                 )}
                 <div className="custom-color">
                   <input
@@ -1035,12 +1131,13 @@ export default function Home() {
                     maxLength={7}
                     onBlur={(e) => {
                       if (/^#[0-9a-f]{6}$/i.test(e.target.value))
-                        setColor(e.target.value);
+                        setColor(e.target.value.toLowerCase());
                       else e.target.value = color.toUpperCase();
                     }}
                   />
                   <button
                     title="Save color"
+                    aria-label="Save color"
                     onClick={() =>
                       updateContext({
                         palette: [
@@ -1052,70 +1149,48 @@ export default function Home() {
                     +
                   </button>
                 </div>
-              </details>
-              <details>
-                <summary>Visibility</summary>
-                {parts.map((p) => (
-                  <label className="setting" key={p}>
-                    <span>{p.replace('_', ' ')}</span>
-                    <Switch
-                      checked={view.visible[p]}
-                      onCheckedChange={(v) =>
-                        setView({
-                          ...view,
-                          visible: { ...view.visible, [p]: v },
-                        })
-                      }
-                      size="sm"
-                    />
-                  </label>
-                ))}
-                {(['showBase', 'showOverlay'] as const).map((key) => (
-                  <label className="setting" key={key}>
-                    <span>
-                      {key === 'showBase' ? 'Base visible' : 'Overlay visible'}
-                    </span>
-                    <Switch
-                      size="sm"
-                      checked={view[key]}
-                      onCheckedChange={(v) => setView({ ...view, [key]: v })}
-                    />
-                  </label>
-                ))}
-              </details>
-              <details>
-                <summary>Options</summary>
-                <label className="setting">
-                  Mirror paint
-                  <Switch
-                    size="sm"
-                    checked={mirror}
-                    onCheckedChange={setMirror}
-                  />
-                </label>
-                <label className="setting">
-                  UV labels
-                  <Switch
-                    size="sm"
-                    checked={labels}
-                    onCheckedChange={setLabels}
-                  />
-                </label>
+              </section>
+              {mode !== '2d' && (
+                <VisibilityControls
+                  view={view}
+                  onChange={(visible) => setView({ ...view, visible })}
+                />
+              )}
+              <section className="rail-group paint-options">
+                <div className="rail-heading">
+                  <span>Paint</span>
+                </div>
+                <div className="rail-toggles">
+                  <button
+                    aria-pressed={mirror}
+                    onClick={() => setMirror(!mirror)}
+                  >
+                    <FlipHorizontal2 size={13} />
+                    Mirror
+                  </button>
+                  {mode !== '3d' && (
+                    <button
+                      aria-pressed={labels}
+                      onClick={() => setLabels(!labels)}
+                    >
+                      <Grid2X2 size={13} />
+                      UV labels
+                    </button>
+                  )}
+                </div>
                 <Tabs
                   value={skin.model}
                   onValueChange={(v) => convert(v as Model)}
                 >
-                  <TabsList>
+                  <TabsList aria-label="Body model">
                     <TabsTrigger value="classic">Classic</TabsTrigger>
                     <TabsTrigger value="slim">Slim</TabsTrigger>
                   </TabsList>
                 </Tabs>
-              </details>
-              <p className="muted">
-                64 × 64 · {skin.model}
-                <br />
-                {selection?.region ?? 'No selection'}
-              </p>
+              </section>
+              {selection?.region && (
+                <p className="surface-location">{selection.region}</p>
+              )}
               {selection && (
                 <button
                   onClick={() => {
@@ -1219,7 +1294,7 @@ export default function Home() {
           </AgentDock>
           <footer>
             <span>
-              {mode === '3d'
+              {mode !== '2d'
                 ? tool === 'rotate'
                   ? 'Drag to rotate · Scroll to zoom'
                   : 'Drag on skin to edit · Drag outside to rotate'

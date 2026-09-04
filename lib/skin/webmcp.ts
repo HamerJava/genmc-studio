@@ -104,15 +104,33 @@ export function toolDefinitions(
     ],
     [
       'set_view',
-      'Set a pose or animated preview, displayed layer, model type, or 2D/3D view. Model conversion requires expectedRevision and is an undoable texture edit; changing pose never changes pixels.',
+      'Set a pose or animated preview, displayed layer, model type, or 2D/3D/split view. color highlights exact RGB matches in both previews without editing pixels. visibleParts shows only these body parts; showBase/showOverlay control 3D layer visibility. Model conversion requires expectedRevision and is an undoable texture edit; changing pose never changes pixels.',
       object({
+        color: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
+        visibleParts: {
+          type: 'array',
+          maxItems: 6,
+          items: {
+            type: 'string',
+            enum: [
+              'head',
+              'body',
+              'right_arm',
+              'left_arm',
+              'right_leg',
+              'left_leg',
+            ],
+          },
+        },
+        showBase: { type: 'boolean' },
+        showOverlay: { type: 'boolean' },
         animated: { type: 'boolean' },
         pose: {
           type: 'string',
           enum: ['stand', 'walk'],
         },
         layer: { type: 'string', enum: ['base', 'overlay'] },
-        mode: { type: 'string', enum: ['2d', '3d'] },
+        mode: { type: 'string', enum: ['2d', '3d', 'split'] },
         model: { type: 'string', enum: ['classic', 'slim'] },
         expectedRevision: integer,
       }),

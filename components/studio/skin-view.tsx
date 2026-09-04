@@ -4,6 +4,7 @@ import * as T from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { atlas, dimensions, parts, type Part } from '@/lib/skin/atlas';
 import { pixelCanvas, type Skin, type View } from '@/lib/skin/engine';
+import { drawColorHighlights } from '@/lib/skin/color-highlight';
 import type { Selection } from '@/lib/skin/workspace';
 
 type Props = {
@@ -12,6 +13,7 @@ type Props = {
   paint?: boolean;
   grid?: boolean;
   mask?: number[];
+  colorMatches?: number[];
   selected?: Selection;
   onPixel?: (x: number, y: number) => void;
   onStart?: () => void;
@@ -55,7 +57,14 @@ function pose(part: Part, v: View, phase: number) {
   return [x, y, z] as const;
 }
 export default function SkinView(props: Props) {
-  const { skin, view, grid = false, mask = [], selected } = props;
+  const {
+    skin,
+    view,
+    grid = false,
+    mask = [],
+    selected,
+    colorMatches = [],
+  } = props;
   const host = useRef<HTMLDivElement>(null);
   const latest = useRef(props);
   latest.current = props;
@@ -113,16 +122,20 @@ export default function SkinView(props: Props) {
       view,
     };
     controls.addEventListener('change', render);
+    let previousFit = 0;
     const resize = () => {
       const { width, height } = el.getBoundingClientRect();
       renderer.setSize(width, height);
       camera.aspect = width / Math.max(1, height);
-      camera.position.copy(
-        new T.Vector3(0.48, 0.22, 0.85)
-          .normalize()
-          .multiplyScalar(Math.max(78, 43 / camera.aspect))
-          .add(controls.target),
-      );
+      const fit = Math.max(78, 43 / camera.aspect);
+      const offset = previousFit
+        ? camera.position
+            .clone()
+            .sub(controls.target)
+            .multiplyScalar(fit / previousFit)
+        : new T.Vector3(0.48, 0.22, 0.85).normalize().multiplyScalar(fit);
+      camera.position.copy(offset.add(controls.target));
+      previousFit = fit;
       camera.updateProjectionMatrix();
       controls.update();
       render();
@@ -391,13 +404,15 @@ export default function SkinView(props: Props) {
     ctx.fillStyle = 'rgba(110,112,245,.48)';
     for (const i of mask)
       ctx.fillRect((i % 64) * 12, Math.floor(i / 64) * 12, 12, 12);
+    drawColorHighlights(ctx, colorMatches);
     s.hints.needsUpdate = true;
     s.render();
-  }, [skin.model, view.layer, grid, hovered, mask, selected]);
+  }, [skin.model, view.layer, grid, hovered, mask, selected, colorMatches]);
   return (
     <div
       ref={host}
       className="skin-view"
+      data-color-match-count={colorMatches.length}
       data-layer={view.layer}
       data-animated={!!view.animated}
       aria-label={`3D skin preview, ${view.pose} pose${view.animated ? ', animated' : ''}`}

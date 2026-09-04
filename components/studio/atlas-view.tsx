@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { atlas, regionAt, type Layer } from '@/lib/skin/atlas';
+import { drawColorHighlights } from '@/lib/skin/color-highlight';
 import { pixelCanvas, type Skin } from '@/lib/skin/engine';
 export default function AtlasView({
   skin,
@@ -12,6 +13,7 @@ export default function AtlasView({
   grid = false,
   layer = 'base',
   mask = [],
+  colorMatches = [],
 }: {
   skin: Skin;
   selected?: { x: number; y: number; width: number; height: number };
@@ -22,6 +24,7 @@ export default function AtlasView({
   grid?: boolean;
   layer?: Layer;
   mask?: number[];
+  colorMatches?: number[];
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const down = useRef(false);
@@ -76,6 +79,7 @@ export default function AtlasView({
         );
       }
     }
+    drawColorHighlights(ctx, colorMatches);
     if (selected) {
       ctx.strokeStyle = '#ff7733';
       ctx.lineWidth = 2;
@@ -86,7 +90,7 @@ export default function AtlasView({
         selected.height * 12,
       );
     }
-  }, [skin, selected, labels, grid, hovered, layer, mask]);
+  }, [skin, selected, labels, grid, hovered, layer, mask, colorMatches]);
   function hover(e: React.PointerEvent) {
     const b = e.currentTarget.getBoundingClientRect();
     const x = Math.floor(((e.clientX - b.left) / b.width) * 64);
@@ -119,6 +123,7 @@ export default function AtlasView({
         width={768}
         height={768}
         aria-label="64 by 64 skin canvas"
+        data-color-match-count={colorMatches.length}
         onPointerEnter={hover}
         onPointerLeave={() => setHovered(false)}
         onPointerDown={(e) => {
