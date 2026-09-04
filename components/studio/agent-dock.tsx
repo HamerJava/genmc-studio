@@ -266,20 +266,13 @@ export default function AgentDock({
       <div className="dock-context">
         <div>
           <button
-            title="Select an area"
-            aria-label="Select area for agent"
-            aria-pressed={tool === 'select'}
-            onClick={() => onTool('select')}
+            title="Mark an area with a rectangle or freehand"
+            aria-label="Mark area for agent"
+            aria-pressed={tool === 'mark'}
+            onClick={() => onTool('mark')}
           >
             <Scan size={13} />
-          </button>
-          <button
-            title="Paint a mask"
-            aria-label="Mask pen for agent"
-            aria-pressed={tool === 'mask'}
-            onClick={() => onTool('mask')}
-          >
-            <Sparkles size={13} />
+            Mark
           </button>
           <span>
             {context.mask.length

@@ -56,6 +56,7 @@ import {
   recordChange,
   travel,
   describeContext,
+  contextIndices,
   enforceContext,
   validateWorkspace,
   type EditContext,
@@ -102,6 +103,10 @@ export default function Home() {
   const [mode, setMode] = useState('3d');
   const [tab, setTab] = useState('studio');
   const [tool, setTool] = useState('rotate');
+  const [markMethod, setMarkMethod] = useState<'rectangle' | 'freehand'>(
+    'rectangle',
+  );
+  const [eraseMarks, setEraseMarks] = useState(false);
   const [color, setColor] = useState('#71826c');
   const [mirror, setMirror] = useState(false);
   const [labels, setLabels] = useState(false);
@@ -597,24 +602,29 @@ export default function Home() {
     if (!ready || tool === 'rotate') return;
     const r = regionAt(skinRef.current.model, x, y);
     if (!r) return;
-    if (tool === 'select') {
+    if (tool === 'mark' && markMethod === 'rectangle') {
       const start = selectionStart.current ?? { x, y, region: r.id };
       if (start.region !== r.id) return;
       selectionStart.current = start;
-      setSelection({
-        x: Math.min(x, start.x),
-        y: Math.min(y, start.y),
-        width: Math.abs(x - start.x) + 1,
-        height: Math.abs(y - start.y) + 1,
-        region: r.id,
+      updateContext({
+        selection: {
+          x: Math.min(x, start.x),
+          y: Math.min(y, start.y),
+          width: Math.abs(x - start.x) + 1,
+          height: Math.abs(y - start.y) + 1,
+          region: r.id,
+        },
+        mask: [],
       });
       return;
     }
-    if (tool === 'mask' || tool === 'unmask') {
-      const mask = new Set(contextRef.current.mask);
-      if (tool === 'mask') mask.add(y * 64 + x);
+    if (tool === 'mark') {
+      const mask = new Set(
+        contextIndices(contextRef.current, skinRef.current.model),
+      );
+      if (!eraseMarks) mask.add(y * 64 + x);
       else mask.delete(y * 64 + x);
-      updateContext({ mask: [...mask] });
+      updateContext({ mask: [...mask], selection: undefined });
       return;
     }
     if (tool === 'pipette') {
@@ -831,6 +841,51 @@ export default function Home() {
             </label>
           </div>
           <div className={`workbench ${activity ? 'agent-painting' : ''}`}>
+            {tool === 'mark' && (
+              <div
+                className="mark-methods"
+                role="group"
+                aria-label="Marking method"
+              >
+                <span>Mark area</span>
+                <div className="mark-method-options">
+                  {(['rectangle', 'freehand'] as const).map((method) => (
+                    <button
+                      key={method}
+                      aria-pressed={markMethod === method}
+                      onClick={() => {
+                        setMarkMethod(method);
+                        selectionStart.current = null;
+                      }}
+                      title={
+                        method === 'rectangle'
+                          ? 'Draw a new rectangular area'
+                          : 'Refine the marked area pixel by pixel'
+                      }
+                    >
+                      {method === 'rectangle' ? (
+                        <Scan size={13} />
+                      ) : (
+                        <Pencil size={13} />
+                      )}
+                      {method === 'rectangle' ? 'Rectangle' : 'Freehand'}
+                    </button>
+                  ))}
+                </div>
+                {markMethod === 'freehand' && (
+                  <button
+                    className="mark-subtract"
+                    aria-label="Erase marks"
+                    aria-pressed={eraseMarks}
+                    title="Remove pixels from the marked area"
+                    onClick={() => setEraseMarks(!eraseMarks)}
+                  >
+                    <Eraser size={13} />
+                    Erase
+                  </button>
+                )}
+              </div>
+            )}
             {activity ? (
               <div className="agent-scan" aria-hidden="true" />
             ) : (
@@ -849,9 +904,7 @@ export default function Home() {
                 [Eraser, 'eraser', 'Eraser'],
                 [Pipette, 'pipette', 'Pick color'],
                 [PaintBucket, 'fill', 'Fill face'],
-                [Scan, 'select', 'Select area'],
-                [Sparkles, 'mask', 'Mask pen'],
-                [Eraser, 'unmask', 'Erase mask'],
+                [Scan, 'mark', 'Mark area'],
               ].map(([Icon, id, label]: any) => (
                 <button
                   key={id}
@@ -1170,7 +1223,7 @@ export default function Home() {
                 ? tool === 'rotate'
                   ? 'Drag to rotate · Scroll to zoom'
                   : 'Drag on skin to edit · Drag outside to rotate'
-                : 'Pixel-perfect · Select a region for your agent'}
+                : 'Pixel-perfect · Mark an area for your agent'}
             </span>
             <button className="agent-status" onClick={() => setHelp(true)}>
               <span className={mcp === 'Agent ready' ? 'dot ready' : 'dot'} />

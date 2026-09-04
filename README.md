@@ -28,7 +28,7 @@ npm run build
 - Standing and walking with optional animation in a compact control row. Movement pauses during pointer interaction.
 - Subtle green base grid and raised violet overlay grid, with an obvious layer switch.
 - Six presets extracted from the active skin, updated after edits, imports, templates and undo; custom colors remain available.
-- Compact agent input bar with queued messages, delivery receipts, rectangular context selection and mask pen.
+- Compact agent input bar with queued messages, delivery receipts, one Mark area tool with Rectangle and Freehand methods. Freehand can add to or erase from a rectangle; a new rectangle replaces the previous marks.
 - Live tool activity, scan/glow feedback and persistent mixed-author history with filters and timeline navigation.
 - Base/overlay editing; per-part visibility; PNG import and marked export.
 - Pencil, eraser (overlay only), pipette, face fill, rectangular selection, mirrored painting, undo and redo.
