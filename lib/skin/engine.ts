@@ -173,6 +173,7 @@ export type View = {
   visible: Record<Part, boolean>;
   showOverlay: boolean;
   showBase: boolean;
+  partLayers?: Partial<Record<Part, 'base' | 'overlay' | 'hidden'>>;
 };
 export function pixelCanvas(pixels: string[]) {
   const c = document.createElement('canvas');

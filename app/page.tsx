@@ -1,28 +1,21 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import {
   Pencil,
-  MousePointer2,
-  Undo2,
-  Redo2,
+  Plus,
   Download,
   Upload,
   Box,
   Grid2X2,
   Eraser,
-  Pipette,
   PaintBucket,
   Scan,
   FlipHorizontal2,
-  Check,
-  ChevronRight,
   Sparkles,
   Play,
   Pause,
 } from 'lucide-react';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -50,11 +43,13 @@ import { markSkin } from '@/lib/skin/marker';
 import { pngData, readPng } from '@/lib/skin/png';
 import { toolDefinitions, registerTools } from '@/lib/skin/webmcp';
 import {
+  MAX_SAVED_COLORS,
   emptyContext,
   emptyJournal,
   recordChange,
   travel,
   describeContext,
+  addMaskRegion,
   enforceContext,
   validateWorkspace,
   type EditContext,
@@ -62,13 +57,25 @@ import {
   type Author,
   type Selection,
 } from '@/lib/skin/workspace';
+import { skinPalette } from '@/lib/skin/palette';
+import {
+  completeMessages,
+  enqueueMessage,
+  markMessagesRead,
+  UserActionChannel,
+  type UserAction,
+} from '@/lib/skin/inbox';
+import { visualTargets, regionLabel, visualDuration, type AgentVisual } from '@/lib/skin/agent-visual';
+import AgentDock, { callLabel, type AgentCall } from '@/components/studio/agent-dock';
+import ThemeToggle from '@/components/studio/theme-toggle';
 import AtlasView from '@/components/studio/atlas-view';
+import Timeline from '@/components/studio/timeline';
 const SkinView = dynamic(() => import('@/components/studio/skin-view'), {
   ssr: false,
 });
 const initialView: View = {
   pose: 'walk',
-  layer: 'base',
+  layer: 'overlay',
   visible: allVisible,
   showOverlay: true,
   showBase: true,
@@ -77,14 +84,46 @@ const poseLabels = {
   stand: 'Stand',
   walk: 'Walk',
 };
-const swatches = [
-  '#71826c',
-  '#e1b892',
-  '#302f2b',
-  '#faf7ee',
-  '#535e8b',
-  '#bc7990',
-];
+const partLabels: Record<string, string> = {
+  head: 'Head',
+  body: 'Body',
+  right_arm: 'R arm',
+  left_arm: 'L arm',
+  right_leg: 'R leg',
+  left_leg: 'L leg',
+};
+// One segmented control for every either/or choice in the studio, so the
+// interface never needs a dropdown to switch mode, layer, pose or model.
+function Seg({
+  value,
+  onChange,
+  options,
+  label,
+  children,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: [string, string, React.ComponentType<{ size?: number }>?][];
+  label: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="seg" role="group" aria-label={label}>
+      {options.map(([id, text, Icon]) => (
+        <button
+          key={id}
+          aria-pressed={value === id}
+          className={value === id ? 'selected' : ''}
+          onClick={() => onChange(id)}
+        >
+          {Icon && <Icon size={13} />}
+          {text}
+        </button>
+      ))}
+      {children}
+    </div>
+  );
+}
 async function api(path: string, init?: RequestInit) {
   const r = await fetch(path, init);
   const d: any = await r.json();
@@ -94,17 +133,38 @@ async function api(path: string, init?: RequestInit) {
 export default function Home() {
   const [skin, setSkin] = useState<Skin>(() => makeSkin());
   const skinRef = useRef(skin);
+  const swatches = useMemo(() => skinPalette(skin), [skin.pixels, skin.model]);
+  const [sessionId, setSessionId] = useState('');
+  const sessionRef = useRef('');
+  const switching = useRef(false);
+  const [sessions, setSessions] = useState<{id:string;name:string;sourceId?:string}[]>([]);
+  const [channel, setChannel] = useState(() => new UserActionChannel());
+  const lastDelivery = useRef(0);
   const [view, setView] = useState<View>(initialView);
   const [mode, setMode] = useState('3d');
   const [tab, setTab] = useState('studio');
-  const [tool, setTool] = useState('rotate');
-  const [color, setColor] = useState('#71826c');
+  const [tool, setTool] = useState('select');
+  const [markMethod, setMarkMethod] = useState('rectangle');
+  const [color, setColor] = useState('#737373');
   const [mirror, setMirror] = useState(false);
   const [labels, setLabels] = useState(false);
   const [context, setContext] = useState<EditContext>(emptyContext);
   const contextRef = useRef(context);
   const selection = context.selection;
-  function updateContext(patch: Partial<EditContext>) {
+  // Skin colors and saved colors share one grid; saved ones keep a ring.
+  const colors = useMemo(
+    () => [...new Set([...swatches, ...context.palette].map(c => c.toLowerCase()))],
+    [swatches, context.palette],
+  );
+  function notifyAction(kind: UserAction['kind']) {
+    channel.publish({
+      kind,
+      skinRevision: skinRef.current.revision,
+      contextRevision: contextRef.current.revision,
+    });
+  }
+  function updateContext(patch: Partial<EditContext>, fromUser = true) {
+    if (switching.current) return;
     const next = {
       ...contextRef.current,
       ...patch,
@@ -112,9 +172,19 @@ export default function Home() {
     };
     contextRef.current = next;
     setContext(next);
+    if (fromUser)
+      notifyAction(
+        patch.messages
+          ? 'message'
+          : patch.mask
+            ? 'mask'
+            : 'selection' in patch
+              ? 'selection'
+              : 'context',
+      );
   }
-  function setSelection(selection?: Selection) {
-    updateContext({ selection });
+  function setSelection(selection?: Selection, fromUser = true) {
+    updateContext({ selection }, fromUser);
   }
   const [journal, setJournal] = useState<Journal>(emptyJournal);
   const journalRef = useRef(journal);
@@ -122,10 +192,38 @@ export default function Home() {
     journalRef.current = j;
     setJournal(j);
   }
-  const [historyFilter, setHistoryFilter] = useState('all');
   const [grid, setGrid] = useState(true);
-  const [activity, setActivity] = useState('');
+  const [calls, setCalls] = useState<AgentCall[]>([]);
   const activityId = useRef(0);
+  const [agentVisual, setAgentVisual] = useState<AgentVisual>();
+  useEffect(() => {
+    if (!agentVisual || !['done', 'error'].includes(agentVisual.phase)) return;
+    const timer = setTimeout(() => setAgentVisual(v => v?.id === agentVisual.id ? undefined : v), visualDuration + 300);
+    return () => clearTimeout(timer);
+  }, [agentVisual]);
+  const activity = calls.some(
+    (c) => c.status === 'running' && c.name !== 'wait_for_user_action',
+  );
+  function sendMessage(text: string) {
+    const c = contextRef.current;
+    const messages = enqueueMessage(c.messages, {
+      id: crypto.randomUUID(),
+      text,
+      createdAt: Date.now(),
+      readAt: null,
+      skinRevision: skinRef.current.revision,
+      contextRevision: c.revision + 1,
+      selection: c.selection ? { ...c.selection } : undefined,
+      mask: [...c.mask],
+    });
+    updateContext({ messages, brief: text });
+  }
+  function cancelMessage(id: string) {
+    const messages = contextRef.current.messages.filter(
+      (m) => m.id !== id || m.completedAt !== undefined,
+    );
+    updateContext({ messages, brief: messages.at(-1)?.text ?? '' });
+  }
   const stroke = useRef<Skin | null>(null);
   function startStroke() {
     selectionStart.current = null;
@@ -144,6 +242,7 @@ export default function Home() {
         ),
       );
       stroke.current = null;
+      notifyAction('edit');
     }
     selectionStart.current = null;
   }
@@ -162,15 +261,19 @@ export default function Home() {
     x: number;
     y: number;
     region: string;
+    mask: number[];
   } | null>(null);
   const saveChain = useRef(Promise.resolve());
-  const runRef = useRef<(n: string, i: any) => any>(() => {});
+  const runRef = useRef<(n: string, i: any, signal?: AbortSignal) => any>(
+    () => {},
+  );
   function commit(
     next: Skin,
     record = true,
     author: Author = 'user',
     label = 'Edit skin',
   ) {
+    if (switching.current) return {revision:skinRef.current.revision};
     if (record && !stroke.current)
       updateJournal(
         recordChange(journalRef.current, skinRef.current, next, author, label),
@@ -178,6 +281,7 @@ export default function Home() {
     skinRef.current = next;
     setSkin(next);
     setSaved('Saving…');
+    if (author === 'user' && !stroke.current) notifyAction('edit');
     return { revision: next.revision };
   }
   function edit(
@@ -197,12 +301,13 @@ export default function Home() {
       );
     return commit(next, true, author, label);
   }
-  function checkout(cursor: number) {
+  function checkout(cursor: number, author: Author = 'user') {
+    if (switching.current) return {revision:skinRef.current.revision};
     const result = travel(journalRef.current, skinRef.current, cursor);
     updateJournal(result.journal);
-    return commit(result.skin, false);
+    return commit(result.skin, false, author);
   }
-  function history(which: 'undo' | 'redo') {
+  function history(which: 'undo' | 'redo', author: Author = 'user') {
     return checkout(
       Math.max(
         0,
@@ -211,6 +316,7 @@ export default function Home() {
           journalRef.current.cursor + (which === 'undo' ? -1 : 1),
         ),
       ),
+      author,
     );
   }
   function convert(model: Model, author: Author = 'user') {
@@ -232,29 +338,66 @@ export default function Home() {
       author,
       `Switch to ${model}`,
     );
-    setSelection(undefined);
+    setSelection(undefined, author === 'user');
   }
   async function readGallery(id: string) {
     if (/^starter-[0-2]$/.test(id))
       return { ...makeSkin(Number(id.slice(-1))), id };
     return await api(`/api/gallery/${encodeURIComponent(id)}`);
   }
-  async function useTemplate(
-    id: string,
-    expected = skinRef.current.revision,
-    author: Author = 'user',
-  ) {
-    const s = validateSkin(await readGallery(id));
-    if (expected !== skinRef.current.revision)
-      throw Error('Skin changed while loading template. Try again.');
-    commit(
-      { ...s, sourceId: id, revision: skinRef.current.revision + 1 },
-      true,
-      author,
-      `Template: ${s.name}`,
-    );
-    setSelection(undefined);
-    setTab('studio');
+  function installSession(data: any) {
+    const next = validateSkin(data.skin);
+    const workspace = validateWorkspace(data.skin.workspace);
+    sessionRef.current = data.sessionId;
+    setSessionId(data.sessionId);
+    setSessions(data.sessions);
+    skinRef.current = next; setSkin(next);
+    contextRef.current = workspace.context; setContext(workspace.context);
+    updateJournal(workspace.journal);
+    setChannel(new UserActionChannel()); lastDelivery.current = 0;
+    setCalls([]); setAgentVisual(undefined); setPublish(null);
+    setView(initialView); selectionStart.current = null;
+    setTool('select'); setTab('studio'); setSaved('Saved');
+  }
+  async function persistCurrent() {
+    const snapshot = { ...skinRef.current, sessionId: sessionRef.current, workspace: { context: contextRef.current, journal: journalRef.current } };
+    await saveChain.current.catch(() => {});
+    await api('/api/draft', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(snapshot) });
+  }
+  async function switchSession(target: { id?:string; skin?:Skin }) {
+    if (switching.current || stroke.current) throw Error('Finish the current action before switching skins');
+    switching.current = true; readyRef.current = false; setReady(false);
+    try {
+      await persistCurrent();
+      const data = target.id
+        ? await api(`/api/draft?id=${encodeURIComponent(target.id)}`)
+        : await api('/api/draft', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...target.skin,workspace:{context:emptyContext,journal:emptyJournal}})});
+      installSession(data);
+      // Persist the active pointer when resuming an existing session.
+      await api('/api/draft', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data.skin,sessionId:data.sessionId})});
+      return {sessionId:data.sessionId,revision:skinRef.current.revision,name:skinRef.current.name};
+    } finally { switching.current=false; readyRef.current=true; setReady(true); }
+  }
+  async function useTemplate(id:string, expected=skinRef.current.revision, author:Author='user') {
+    const origin = sessionRef.current;
+    const data = await api('/api/draft');
+    const existing = data.sessions.find((x:any) => x.sourceId === id);
+    const template = existing ? undefined : validateSkin(await readGallery(id));
+    if(origin !== sessionRef.current || expected !== skinRef.current.revision) throw Error('Skin changed while loading. Read the current session and try again.');
+    return switchSession(existing ? {id:existing.id} : {skin:{...template!,sourceId:id,revision:0}});
+  }
+  async function selectSkin(input:any) {
+    if (!['sessions','gallery'].includes(input.source)) throw Error('Choose sessions or gallery');
+    const origin=sessionRef.current;
+    if ((!input.id && !input.name) || (input.id && input.name)) throw Error('Supply exactly one id or name');
+    const items = input.source === 'sessions'
+      ? (await api('/api/draft')).sessions
+      : [...[0,1,2].map(i=>({id:`starter-${i}`,name:makeSkin(i).name})), ...(await api(`/api/gallery${input.name ? `?name=${encodeURIComponent(input.name)}` : ''}`)).skins];
+    if(origin !== sessionRef.current) throw Error('Skin session changed while searching');
+    const matches = items.filter((item:any)=>input.id ? item.id===input.id : item.name.toLowerCase()===input.name.toLowerCase());
+    if(input.id && input.source==='gallery' && !matches.length) return useTemplate(input.id);
+    if(matches.length!==1) return {status:matches.length ? 'ambiguous' : 'not_found',candidates:matches.map((x:any)=>({id:x.id,name:x.name}))};
+    return input.source==='sessions' ? switchSession({id:matches[0].id}) : useTemplate(matches[0].id);
   }
   async function loadGallery() {
     try {
@@ -264,8 +407,11 @@ export default function Home() {
       setNotice((e as Error).message);
     }
   }
-  runRef.current = async (name, input) => {
+  runRef.current = async (name, input, signal) => {
     const s = skinRef.current;
+    const readOnly = ['get_skin_state','get_edit_context','get_uv_atlas','read_history','read_region','wait_for_user_action','list_skins','read_gallery_skin','export_skin_images'].includes(name);
+    if (!readOnly && input.expectedSessionId !== sessionRef.current) throw Error('Skin session changed: read get_skin_state and pass its sessionId as expectedSessionId');
+    if (switching.current) throw Error('Skin session is switching');
     if (
       stroke.current &&
       ![
@@ -274,12 +420,41 @@ export default function Home() {
         'get_edit_context',
         'read_history',
         'read_region',
+        'wait_for_user_action',
       ].includes(name)
     )
       throw Error('A user stroke is in progress. Retry after it ends.');
     switch (name) {
+      case 'export_skin_images': {
+        if (input.expectedSessionId !== sessionRef.current || input.expectedRevision !== s.revision) throw Error('Skin or session changed: read get_skin_state before exporting');
+        const snapshot = structuredClone(s);
+        const origin = sessionRef.current;
+        const {exportSkinPreviews} = await import('@/lib/skin/preview-export');
+        if (origin !== sessionRef.current || snapshot.revision !== skinRef.current.revision) throw Error('Skin changed before rendering: read current state');
+        return exportSkinPreviews(snapshot,input);
+      }
+      case 'create_skin': {
+        if(typeof input.name !== 'string' || !input.name.trim() || input.name.length>80) throw Error('A skin name is required (max 80 characters)');
+        const origin=sessionRef.current;
+        const next=input.templateId ? validateSkin(await readGallery(input.templateId)) : {...makeSkin(),pixels:makeSkin().pixels.map(c=>c==='#00000000'?c:'#b8b8b8')};
+        if(origin!==sessionRef.current) throw Error('Skin session changed while creating');
+        return switchSession({skin:{...next,name:input.name.trim(),revision:0,sourceId:input.templateId}});
+      }
+      case 'select_skin': return selectSkin(input);
+      case 'complete_requests': {
+        if(input.expectedRevision!==s.revision) throw Error('Skin changed: read current state before completing requests');
+        const messages=completeMessages(contextRef.current.messages,input.messageIds);
+        updateContext({messages,brief:messages.filter(m=>m.completedAt===undefined).at(-1)?.text ?? ''},false);
+        return {completed:input.messageIds};
+      }
       case 'get_skin_state':
-        return { ...s, selection: selection ?? null, view, mode };
+        return { ...s, sessionId:sessionRef.current, selection: selection ?? null, view, mode };
+      case 'wait_for_user_action':
+        return await channel.wait(
+          input.afterVersion,
+          input.timeoutMs ?? 25000,
+          signal,
+        );
       case 'get_edit_context':
         return describeContext(contextRef.current, s.model);
       case 'read_history':
@@ -333,8 +508,8 @@ export default function Home() {
       case 'set_selection': {
         const r = atlas(s.model).find((r) => r.id === input.region);
         if (!r) throw Error('Unknown region');
-        setSelection({ ...r, region: r.id });
-        setView((v) => ({ ...v, layer: r.layer }));
+        setSelection({ ...r, region: r.id }, false);
+        setView((v) => ({ ...v, layer: r.layer, partLayers: { ...v.partLayers, [r.part]: r.layer }, visible: { ...v.visible, [r.part]: true } }));
         return { selection: r };
       }
       case 'set_view': {
@@ -358,17 +533,18 @@ export default function Home() {
           ...(typeof input.animated === 'boolean'
             ? { animated: input.animated }
             : {}),
-          ...(input.layer ? { layer: input.layer } : {}),
+          ...(input.layer ? { layer: input.layer, partLayers: {} } : {}),
         }));
         if (input.mode) setMode(input.mode);
         return { updated: true };
       }
       case 'undo':
-        return history('undo');
+        return history('undo', 'agent');
       case 'redo':
-        return history('redo');
+        return history('redo', 'agent');
       case 'list_skins':
         return {
+          sessions:(await api('/api/draft')).sessions,
           starters: [0, 1, 2].map((i) => ({
             id: `starter-${i}`,
             name: makeSkin(i).name,
@@ -380,8 +556,7 @@ export default function Home() {
       case 'use_template':
         if (!Number.isInteger(input.expectedRevision))
           throw Error('expectedRevision is required');
-        await useTemplate(input.id, input.expectedRevision, 'agent');
-        return { revision: skinRef.current.revision };
+        return useTemplate(input.id, input.expectedRevision, 'agent');
       case 'prepare_publish':
         setPublish(structuredClone(s));
         return { status: 'awaiting_human_confirmation', revision: s.revision };
@@ -394,15 +569,7 @@ export default function Home() {
     api('/api/draft')
       .then((d) => {
         if (!active) return;
-        if (d.skin) {
-          const s = validateSkin(d.skin);
-          const workspace = validateWorkspace(d.skin.workspace);
-          contextRef.current = workspace.context;
-          setContext(workspace.context);
-          updateJournal(workspace.journal);
-          skinRef.current = s;
-          setSkin(s);
-        }
+        installSession(d);
         setSaved('Saved');
         setReady(true);
       })
@@ -422,7 +589,8 @@ export default function Home() {
     if (!ready) return;
     setSaved('Saving…');
     const t = setTimeout(() => {
-      const snapshot = { ...skin, workspace: { context, journal } };
+      if (switching.current || sessionId !== sessionRef.current) return;
+      const snapshot = { ...skin, sessionId, workspace: { context, journal } };
       saveChain.current = saveChain.current
         .catch(() => {})
         .then(async () => {
@@ -441,30 +609,96 @@ export default function Home() {
         .catch(() => setSaved('Not saved · check connection'));
     }, 550);
     return () => clearTimeout(t);
-  }, [skin, context, journal, ready]);
+  }, [skin, context, journal, ready, sessionId]);
   useEffect(() => {
+    if (!sessionId) return;
+    const boundSession = sessionId;
     const lifecycle = new AbortController();
     registerTools(
-      toolDefinitions(async (n, i) => {
+      toolDefinitions(async (n, i, signal) => {
+        if (boundSession !== sessionRef.current) throw Error('This tool belongs to another skin session. Fetch the tools again.');
+        const sessionSwitch = ['create_skin','select_skin','use_template'].includes(n);
         if (
           !readyRef.current &&
           !['get_uv_atlas', 'get_skin_state'].includes(n)
         )
           throw Error('Draft is still loading');
         const id = ++activityId.current;
-        setActivity(`Agent · ${n.replaceAll('_', ' ')}`);
+        const before = skinRef.current;
+        const showVisual = n !== 'wait_for_user_action';
+        const targets = visualTargets(before.model, i);
+        if (showVisual) setAgentVisual(v => v?.before && v.phase === 'done' && performance.now() - v.startedAt < visualDuration && !['apply_operations', 'undo', 'redo', 'use_template'].includes(n) ? v : { id, label: callLabel(n), ...targets, startedAt: performance.now(), phase: n === 'apply_operations' ? 'working' : 'reading' });
+        setCalls((c) => [
+          ...c
+            .filter((x) => x.status === 'running')
+            .concat(c.filter((x) => x.status !== 'running').slice(-11)),
+          { id, name: n, status: 'running', startedAt: Date.now() },
+        ]);
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         );
         try {
-          return await runRef.current(n, i);
+          if(boundSession !== sessionRef.current) throw Error('Skin session changed before this call started');
+          const result = await runRef.current(
+            n,
+            i,
+            signal
+              ? AbortSignal.any([signal, lifecycle.signal])
+              : lifecycle.signal,
+          );
+          if (sessionSwitch && boundSession !== sessionRef.current) return {...result,sessionId:sessionRef.current,next:'Read get_skin_state and fetch the new session tools before editing'};
+          if (lifecycle.signal.aborted || signal?.aborted || boundSession !== sessionRef.current) throw Error('Agent call cancelled: skin session changed');
+          if (showVisual) {
+            const after = skinRef.current;
+            const changed = after.pixels.flatMap((color, index) => color !== before.pixels[index] ? [index] : []);
+            const changedRegions = atlas(after.model).filter(r => changed.some(i => i % 64 >= r.x && i % 64 < r.x + r.width && Math.floor(i / 64) >= r.y && Math.floor(i / 64) < r.y + r.height)).map(r => r.id);
+            setAgentVisual(v => v?.id === id ? { ...v, phase: 'done', startedAt: performance.now(), label: changed.length ? `${changed.length} pixels updated` : `${callLabel(n)} · complete`, pixels: changed.length ? changed : targets.pixels, regions: changed.length ? changedRegions : targets.regions, before: changed.length ? before.pixels : undefined, revision: after.revision } : v);
+          }
+          const c = contextRef.current;
+          const pending = c.messages.filter((m) => m.readAt === null);
+          const deliveredAt = Date.now();
+          const userUpdates = {
+            sessionId:sessionRef.current,
+            ...channel.snapshot(lastDelivery.current),
+            skinRevision: skinRef.current.revision,
+            contextRevision: c.revision,
+            messages: pending.map((m) => ({ ...m, readAt: deliveredAt })),
+            delivery:
+              'Returned by this tool; not a background interruption. Re-read get_edit_context before editing after new user actions.',
+          };
+          if (pending.length) {
+            const next = {
+              ...c,
+              messages: markMessagesRead(
+                c.messages,
+                pending.map((m) => m.id),
+                deliveredAt,
+              ),
+            };
+            contextRef.current = next;
+            setContext(next);
+          }
+          lastDelivery.current = channel.version;
+          setCalls((c) =>
+            c.map((call) =>
+              call.id === id
+                ? { ...call, status: 'done', endedAt: Date.now() }
+                : call,
+            ),
+          );
+          return { ...result, sessionId:sessionRef.current, userUpdates };
         } catch (e) {
+          if(boundSession !== sessionRef.current) throw e;
+          if (showVisual) setAgentVisual(v => v?.id === id ? { ...v, phase: 'error', label: 'Action failed · skin unchanged', startedAt: performance.now() } : v);
+          setCalls((c) =>
+            c.map((call) =>
+              call.id === id
+                ? { ...call, status: 'error', endedAt: Date.now() }
+                : call,
+            ),
+          );
           setNotice((e as Error).message);
           throw e;
-        } finally {
-          setTimeout(() => {
-            if (activityId.current === id) setActivity('');
-          }, 1200);
         }
       }),
       lifecycle.signal,
@@ -472,7 +706,7 @@ export default function Home() {
       .then((ok) => setMcp(ok ? 'Agent ready' : 'Use a WebMCP-enabled browser'))
       .catch(() => setMcp('Agent registration failed'));
     return () => lifecycle.abort();
-  }, []);
+  }, [sessionId, channel]);
   const readyRef = useRef(ready);
   readyRef.current = ready;
   useEffect(() => {
@@ -487,34 +721,45 @@ export default function Home() {
     return () => window.removeEventListener('keydown', key);
   }, []);
   function pixel(x: number, y: number) {
-    if (!ready || tool === 'rotate') return;
+    if (!ready || switching.current) return;
     const r = regionAt(skinRef.current.model, x, y);
     if (!r) return;
+    const activeLayer = view.partLayers?.[r.part] ?? view.layer;
+    if (!view.visible[r.part] || activeLayer === 'hidden') return;
     if (tool === 'select') {
-      const start = selectionStart.current ?? { x, y, region: r.id };
+      if (r.layer !== activeLayer) return;
+      if (markMethod === 'freehand') {
+        const c = contextRef.current;
+        const mask = new Set(c.mask);
+        // Refine an existing face or rectangle without losing its marked pixels.
+        if (c.selection) {
+          const q = c.selection;
+          for (let yy = q.y; yy < q.y + q.height; yy++)
+            for (let xx = q.x; xx < q.x + q.width; xx++) mask.add(yy * 64 + xx);
+        }
+        mask.add(y * 64 + x);
+        updateContext({ mask: [...mask], selection: undefined });
+        return;
+      }
+      if (markMethod === 'face') {
+        if (selectionStart.current) return;
+        const c = contextRef.current;
+        const mask = c.selection ? addMaskRegion(c.mask, c.selection) : c.mask;
+        selectionStart.current = { x, y, region: r.id, mask };
+        updateContext({ mask: addMaskRegion(mask, r), selection: undefined });
+        return;
+      }
+      const c = contextRef.current;
+      const start = selectionStart.current ?? { x, y, region: r.id, mask: c.selection ? addMaskRegion(c.mask, c.selection) : [...c.mask] };
       if (start.region !== r.id) return;
       selectionStart.current = start;
-      setSelection({
-        x: Math.min(x, start.x),
-        y: Math.min(y, start.y),
-        width: Math.abs(x - start.x) + 1,
-        height: Math.abs(y - start.y) + 1,
-        region: r.id,
-      });
+      updateContext({ mask: addMaskRegion(start.mask, {
+        x: Math.min(x, start.x), y: Math.min(y, start.y),
+        width: Math.abs(x - start.x) + 1, height: Math.abs(y - start.y) + 1,
+      }), selection: undefined });
       return;
     }
-    if (tool === 'mask' || tool === 'unmask') {
-      const mask = new Set(contextRef.current.mask);
-      if (tool === 'mask') mask.add(y * 64 + x);
-      else mask.delete(y * 64 + x);
-      updateContext({ mask: [...mask] });
-      return;
-    }
-    if (tool === 'pipette') {
-      setColor(skinRef.current.pixels[y * 64 + x].slice(0, 7));
-      return;
-    }
-    if (r.layer !== view.layer) {
+    if (r.layer !== activeLayer) {
       setNotice(`Select the ${r.layer} layer to paint this region.`);
       return;
     }
@@ -564,15 +809,15 @@ export default function Home() {
     if (!file) return;
     try {
       const pixels = await readPng(file);
-      commit(
+      await switchSession({skin:
         validateSkin({
           ...skinRef.current,
           pixels,
           name: file.name.replace(/\.png$/i, ''),
-          revision: skinRef.current.revision + 1,
+          revision: 0,
           sourceId: undefined,
         }),
-      );
+      });
       setNotice('Imported · choose Classic or Slim to match your skin.');
     } catch (e) {
       setNotice((e as Error).message);
@@ -606,7 +851,7 @@ export default function Home() {
     }
   }
   return (
-    <main>
+    <main className={tab === 'studio' ? 'studio' : ''}>
       {activity && <div className="agent-glow" aria-hidden="true" />}
       <header>
         <a className="logo" href="/">
@@ -630,6 +875,8 @@ export default function Home() {
           ))}
         </nav>
         <div className="header-actions">
+          <ThemeToggle />
+          <button disabled={!ready} onClick={() => void switchSession({skin:{...makeSkin(),name:'Untitled skin',pixels:makeSkin().pixels.map(c=>c==='#00000000'?c:'#b8b8b8')}}).catch(e=>setNotice(e.message))} aria-label="New skin"><Plus size={15} />New skin</button>
           <button disabled={!ready} onClick={() => upload.current?.click()}>
             <Upload size={15} />
             Import
@@ -659,9 +906,9 @@ export default function Home() {
       />
       {tab === 'studio' && (
         <section className="workspace">
+          <div className="skin-session-picker"><label htmlFor="skin-session">Your skins</label><select id="skin-session" value={sessionId} disabled={!ready} onChange={e=>void switchSession({id:e.target.value}).catch(e=>setNotice(e.message))}>{sessions.map(item=><option key={item.id} value={item.id}>{item.id===sessionId ? skin.name : item.name}</option>)}</select><span>Separate agent session per skin</span></div>
           <div className="workspace-heading">
             <div>
-              <span className="eyebrow">YOUR WORKSPACE</span>
               <input
                 className="skin-name"
                 aria-label="Skin name"
@@ -678,106 +925,65 @@ export default function Home() {
               />
               <span className="save-state">{saved}</span>
             </div>
-            <Tabs
+            <Seg
+              label="View mode"
               value={mode}
-              onValueChange={(v) => {
-                setMode(String(v));
+              onChange={(v) => {
+                setMode(v);
                 selectionStart.current = null;
               }}
-            >
-              <TabsList>
-                <TabsTrigger value="3d">
-                  <Box />
-                  3D
-                </TabsTrigger>
-                <TabsTrigger value="2d">
-                  <Grid2X2 />
-                  2D
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+              options={[
+                ['3d', '3D', Box],
+                ['2d', '2D', Grid2X2],
+              ]}
+            />
           </div>
           <div className={`layer-bar ${view.layer}`}>
-            <Tabs
-              value={view.layer}
-              onValueChange={(v) =>
-                setView({
-                  ...view,
-                  layer: v as View['layer'],
-                  [v === 'base' ? 'showBase' : 'showOverlay']: true,
-                })
-              }
+            <button
+              className={grid ? 'chip on' : 'chip'}
+              aria-pressed={grid}
+              onClick={() => setGrid(!grid)}
             >
-              <TabsList>
-                <TabsTrigger value="base">Base skin</TabsTrigger>
-                <TabsTrigger value="overlay">Outer layer</TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <span>
-              {view.layer === 'base'
-                ? 'Solid skin · green grid'
-                : 'Raised overlay · violet grid'}
-            </span>
-            <label className="setting">
-              Pixel grid{' '}
-              <Switch size="sm" checked={grid} onCheckedChange={setGrid} />
-            </label>
+              <Grid2X2 size={12} />
+              Pixel grid
+            </button>
           </div>
-          <div className="workbench">
+          {tool === 'select' && <div className="mark-options">
+            <Seg label="Marking method" value={markMethod} onChange={(value) => { setMarkMethod(value); selectionStart.current = null; }} options={[[ 'face', 'Face', Box ], [ 'rectangle', 'Rectangle', Scan ], [ 'freehand', 'Freehand', Pencil ]]} />
+            <span>{markMethod === 'face' ? 'Click a face to mark it' : markMethod === 'rectangle' ? 'Drag to mark an area' : 'Draw to add · start on a mark to erase'}</span>
+          </div>}
+          <div className={`workbench ${activity ? 'agent-painting' : ''}`}>
+            {agentVisual && <div className={`agent-focus-status phase-${agentVisual.phase}`} role="status" aria-live="polite"><Sparkles size={16} /><span><strong>{agentVisual.label}</strong><small>{regionLabel(agentVisual.regions)}</small></span><span className="agent-phase">{agentVisual.phase === 'done' ? 'Complete' : agentVisual.phase === 'error' ? 'Failed' : 'Live'}</span></div>}
             <aside className="tools">
               {[
-                [MousePointer2, 'rotate', 'Rotate'],
                 [Pencil, 'pencil', 'Pencil'],
                 [Eraser, 'eraser', 'Eraser'],
-                [Pipette, 'pipette', 'Pick color'],
                 [PaintBucket, 'fill', 'Fill face'],
-                [Scan, 'select', 'Select area'],
-                [Sparkles, 'mask', 'Mask pen'],
-                [Eraser, 'unmask', 'Erase mask'],
-              ].map(([Icon, id, label]: any) => (
-                <button
-                  key={id}
-                  title={label}
-                  aria-label={label}
-                  aria-pressed={tool === id}
-                  className={tool === id ? 'selected' : ''}
-                  onClick={() => {
-                    setTool(id);
-                    selectionStart.current = null;
-                  }}
-                >
-                  <Icon />
-                </button>
-              ))}
-              <div className="divider" />
-              <button
-                title="Undo (⌘Z)"
-                aria-label="Undo"
-                disabled={!journal.cursor}
-                onClick={() => history('undo')}
-              >
-                <Undo2 />
-              </button>
-              <button
-                title="Redo (⇧⌘Z)"
-                aria-label="Redo"
-                disabled={journal.cursor === journal.entries.length}
-                onClick={() => history('redo')}
-              >
-                <Redo2 />
-              </button>
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                aria-label="Paint color"
-              />
+                null,
+                [Scan, 'select', 'Mark area'],
+              ].map((entry: any, i) =>
+                !entry ? (
+                  <div className="divider" key={i} />
+                ) : (
+                  <ToolButton
+                    key={entry[1]}
+                    entry={entry}
+                    active={tool === entry[1]}
+                    onPick={() => {
+                      setTool(entry[1]);
+                      selectionStart.current = null;
+                    }}
+                  />
+                ),
+              )}
             </aside>
             {mode === '3d' ? (
               <SkinView
                 skin={skin}
+                agentVisual={agentVisual}
+                markMethod={tool === 'select' ? markMethod : undefined}
                 view={view}
-                paint={tool !== 'rotate'}
+                paint={true}
                 grid={grid}
                 mask={context.mask}
                 selected={selection}
@@ -788,10 +994,14 @@ export default function Home() {
             ) : (
               <AtlasView
                 skin={skin}
+                agentVisual={agentVisual}
+                markMethod={tool === 'select' ? markMethod : undefined}
                 selected={selection}
                 labels={labels}
                 grid={grid}
                 layer={view.layer}
+                partLayers={view.partLayers}
+                visibleParts={view.visible}
                 mask={context.mask}
                 onStart={startStroke}
                 onPixel={pixel}
@@ -799,65 +1009,48 @@ export default function Home() {
               />
             )}
             <aside className="inspector">
-              <div className="pose-controls" role="group" aria-label="Pose">
-                {Object.entries(poseLabels).map(([p, label]) => (
+              {mode === '3d' && (
+                <div className="seg pose-seg" role="group" aria-label="Pose">
+                  {Object.entries(poseLabels).map(([p, label]) => (
+                    <button
+                      className={view.pose === p ? 'selected' : ''}
+                      key={p}
+                      aria-pressed={view.pose === p}
+                      onClick={() =>
+                        setView({ ...view, pose: p as View['pose'] })
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
                   <button
-                    className={view.pose === p ? 'selected' : ''}
-                    key={p}
-                    aria-pressed={view.pose === p}
+                    className="seg-icon"
+                    aria-pressed={!!view.animated}
+                    aria-label={
+                      view.animated ? 'Pause animation' : 'Play animation'
+                    }
+                    title={view.animated ? 'Pause animation' : 'Play animation'}
                     onClick={() =>
-                      setView({ ...view, pose: p as View['pose'] })
+                      setView({ ...view, animated: !view.animated })
                     }
                   >
-                    {label}
+                    {view.animated ? <Pause size={12} /> : <Play size={12} />}
                   </button>
-                ))}
-                <button
-                  className="pose-play"
-                  aria-label={
-                    view.animated ? 'Pause animation' : 'Play animation'
-                  }
-                  title={view.animated ? 'Pause animation' : 'Play animation'}
-                  onClick={() => setView({ ...view, animated: !view.animated })}
-                >
-                  {view.animated ? <Pause size={13} /> : <Play size={13} />}
-                </button>
-              </div>
-              <details open>
-                <summary>Color</summary>
-                <div className="swatches">
-                  {swatches.map((c) => (
-                    <button
-                      key={c}
-                      style={{ background: c }}
-                      aria-label={`Use ${c}`}
-                      onClick={() => setColor(c)}
-                    />
-                  ))}
                 </div>
-                {context.palette.length > 0 && (
-                  <details className="saved-colors">
-                    <summary>Saved colors</summary>
-                    <div className="swatches">
-                      {context.palette.map((c) => (
-                        <button
-                          key={c}
-                          style={{ background: c }}
-                          aria-label={`Use saved ${c}`}
-                          onClick={() => setColor(c)}
-                        />
-                      ))}
-                    </div>
-                  </details>
-                )}
-                <div className="custom-color">
+              )}
+              <div className="rail-group">
+                <span className="rail-label">Color</span>
+                <div className="current-color">
                   <input
                     type="color"
-                    aria-label="Custom color"
+                    className="color-well"
+                    title="Pick a color"
+                    aria-label="Pick a color"
                     value={color}
                     onChange={(e) => setColor(e.target.value)}
                   />
                   <input
+                    className="hex"
                     aria-label="Hex color"
                     key={color}
                     defaultValue={color.toUpperCase()}
@@ -869,77 +1062,77 @@ export default function Home() {
                     }}
                   />
                   <button
-                    title="Save color"
+                    className="save-color"
+                    title={context.palette.length >= MAX_SAVED_COLORS ? 'Palette full (128 saved colors)' : 'Add color to palette'}
+                    aria-label="Add color to palette"
+                    disabled={context.palette.length >= MAX_SAVED_COLORS || context.palette.some(c => c.toLowerCase() === color.toLowerCase())}
                     onClick={() =>
                       updateContext({
                         palette: [
-                          ...new Set([...context.palette, color]),
-                        ].slice(-32),
+                          ...new Set([...context.palette.map(c => c.toLowerCase()), color.toLowerCase()]),
+                        ],
                       })
                     }
                   >
                     +
                   </button>
                 </div>
-              </details>
-              <details>
-                <summary>Visibility</summary>
-                {parts.map((p) => (
-                  <label className="setting" key={p}>
-                    <span>{p.replace('_', ' ')}</span>
-                    <Switch
-                      checked={view.visible[p]}
-                      onCheckedChange={(v) =>
-                        setView({
-                          ...view,
-                          visible: { ...view.visible, [p]: v },
-                        })
-                      }
-                      size="sm"
+                <div className="swatches palette-swatches" aria-label="Color palette">
+                  {colors.map((c) => (
+                    <button
+                      key={c}
+                      className={context.palette.some(saved => saved.toLowerCase() === c) ? 'saved' : ''}
+                      style={{ background: c }}
+                      aria-label={`Use ${c}`}
+                      onClick={() => setColor(c)}
                     />
-                  </label>
-                ))}
-                {(['showBase', 'showOverlay'] as const).map((key) => (
-                  <label className="setting" key={key}>
-                    <span>
-                      {key === 'showBase' ? 'Base visible' : 'Overlay visible'}
-                    </span>
-                    <Switch
-                      size="sm"
-                      checked={view[key]}
-                      onCheckedChange={(v) => setView({ ...view, [key]: v })}
-                    />
-                  </label>
-                ))}
-              </details>
-              <details>
-                <summary>Options</summary>
-                <label className="setting">
-                  Mirror paint
-                  <Switch
-                    size="sm"
-                    checked={mirror}
-                    onCheckedChange={setMirror}
-                  />
-                </label>
-                <label className="setting">
-                  UV labels
-                  <Switch
-                    size="sm"
-                    checked={labels}
-                    onCheckedChange={setLabels}
-                  />
-                </label>
-                <Tabs
+                  ))}
+                </div>
+              </div>
+              <div className="rail-group body-parts">
+                <div className="body-parts-heading"><span className="rail-label">Body parts</span><button onClick={() => setView(v => ({ ...v, partLayers: {}, visible: allVisible, layer: 'overlay', showBase: true, showOverlay: true }))}>Reset</button></div>
+                <div className={`body-map model-${skin.model}`} role="group" aria-label="Body part layers">
+                  {parts.map(p => {
+                    const state = view.partLayers?.[p] ?? (view.visible[p] ? view.layer : 'hidden');
+                    const next = state === 'base' ? 'overlay' : state === 'overlay' ? 'hidden' : 'base';
+                    const label = state === 'overlay' ? 'Outer' : state === 'hidden' ? 'Hidden' : 'Base';
+                    return <button key={p} className={`body-part part-${p} state-${state}`} title={`${partLabels[p]} · ${label} — click for ${next === 'overlay' ? 'Outer' : next === 'hidden' ? 'Hidden' : 'Base'}`} aria-label={`${partLabels[p]}: ${label}`} onClick={() => setView(v => ({ ...v, partLayers: { ...v.partLayers, [p]: next }, visible: { ...v.visible, [p]: next !== 'hidden' } }))}><span className="sr-only">{label}</span></button>;
+                  })}
+                </div>
+                <div className="body-legend"><span>Base</span><span>Outer</span><span>Hidden</span></div>
+                <p className="muted">Click a part to cycle layers</p>
+              </div>
+              <div className="rail-group">
+                <span className="rail-label">Paint</span>
+                <div className="chips">
+                  <button
+                    className={mirror ? 'chip on' : 'chip'}
+                    aria-pressed={mirror}
+                    onClick={() => setMirror(!mirror)}
+                  >
+                    <FlipHorizontal2 size={12} />
+                    Mirror
+                  </button>
+                  {mode === '2d' && (
+                    <button
+                      className={labels ? 'chip on' : 'chip'}
+                      aria-pressed={labels}
+                      onClick={() => setLabels(!labels)}
+                    >
+                      UV labels
+                    </button>
+                  )}
+                </div>
+                <Seg
+                  label="Body model"
                   value={skin.model}
-                  onValueChange={(v) => convert(v as Model)}
-                >
-                  <TabsList>
-                    <TabsTrigger value="classic">Classic</TabsTrigger>
-                    <TabsTrigger value="slim">Slim</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </details>
+                  onChange={(v) => convert(v as Model)}
+                  options={[
+                    ['classic', 'Classic'],
+                    ['slim', 'Slim'],
+                  ]}
+                />
+              </div>
               <p className="muted">
                 64 × 64 · {skin.model}
                 <br />
@@ -947,6 +1140,7 @@ export default function Home() {
               </p>
               {selection && (
                 <button
+                  className="rail-action"
                   onClick={() => {
                     try {
                       edit([
@@ -969,143 +1163,31 @@ export default function Home() {
               )}
             </aside>
           </div>
-          <div className="collaboration-panel">
-            <section className="agent-context">
-              <div className="panel-heading">
-                <h2>For your agent</h2>
-                <span
-                  role="status"
-                  className={activity ? 'agent-active' : 'muted'}
-                >
-                  {activity || 'Shared editing context'}
-                </span>
-              </div>
-              <textarea
-                aria-label="Instructions for agent"
-                placeholder="What should change? Your agent can read this."
-                maxLength={4000}
-                value={context.brief}
-                onChange={(e) => updateContext({ brief: e.target.value })}
-              />
-              <div className="context-actions">
-                <button
-                  className={tool === 'select' ? 'selected' : ''}
-                  onClick={() => setTool('select')}
-                >
-                  <Scan size={14} />
-                  Select area
-                </button>
-                <button
-                  className={tool === 'mask' ? 'selected' : ''}
-                  onClick={() => setTool('mask')}
-                >
-                  <Sparkles size={14} />
-                  Mask pen
-                </button>
-                <button
-                  disabled={!selection && !context.mask.length}
-                  onClick={() =>
-                    updateContext({ selection: undefined, mask: [] })
-                  }
-                >
-                  Clear marks
-                </button>
-              </div>
-              <p className="muted">
-                {context.mask.length
-                  ? `${context.mask.length} masked pixels · mask takes priority`
-                  : selection
-                    ? `${selection.width} × ${selection.height} · ${selection.region}`
-                    : 'Drag on the skin to select or mark pixels.'}
-              </p>
-              <label className="setting">
-                Keep agent paint inside marks
-                <Switch
-                  size="sm"
-                  checked={context.limitToContext}
-                  onCheckedChange={(limitToContext) =>
-                    updateContext({ limitToContext })
-                  }
-                />
-              </label>
-            </section>
-            <section className="edit-history">
-              <div className="panel-heading">
-                <h2>History</h2>
-                <div>
-                  <button
-                    aria-label="History back"
-                    disabled={!journal.cursor}
-                    onClick={() => history('undo')}
-                  >
-                    <Undo2 size={14} />
-                  </button>
-                  <button
-                    aria-label="History forward"
-                    disabled={journal.cursor === journal.entries.length}
-                    onClick={() => history('redo')}
-                  >
-                    <Redo2 size={14} />
-                  </button>
-                </div>
-              </div>
-              <Tabs
-                value={historyFilter}
-                onValueChange={(v) => setHistoryFilter(String(v))}
-              >
-                <TabsList>
-                  <TabsTrigger value="all">All</TabsTrigger>
-                  <TabsTrigger value="user">You</TabsTrigger>
-                  <TabsTrigger value="agent">Agent</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <div className="history-list">
-                {journal.entries
-                  .map((e, i) => ({ e, i }))
-                  .filter(
-                    ({ e }) =>
-                      historyFilter === 'all' || e.author === historyFilter,
-                  )
-                  .reverse()
-                  .map(({ e, i }) => (
-                    <button
-                      key={e.id}
-                      className={`history-entry ${i >= journal.cursor ? 'future' : ''} ${i + 1 === journal.cursor ? 'current' : ''}`}
-                      onClick={() => checkout(i + 1)}
-                    >
-                      <span>
-                        {e.author === 'agent' ? (
-                          <Sparkles size={14} />
-                        ) : (
-                          <Pencil size={14} />
-                        )}{' '}
-                        {e.label}
-                      </span>
-                      <small>
-                        {e.author === 'agent' ? 'Agent' : 'You'} ·{' '}
-                        {e.pixels.length} px
-                      </small>
-                    </button>
-                  ))}
-                {!journal.entries.length && (
-                  <p className="muted">Your next edit starts the timeline.</p>
-                )}
-              </div>
-            </section>
-          </div>
-          <footer>
-            <span>
-              {mode === '3d'
-                ? tool === 'rotate'
-                  ? 'Drag to rotate · Scroll to zoom'
-                  : 'Drag on skin to edit · Drag outside to rotate'
-                : 'Pixel-perfect · Select a region for your agent'}
-            </span>
-            <button className="agent-status" onClick={() => setHelp(true)}>
-              <span className={mcp === 'Agent ready' ? 'dot ready' : 'dot'} />
-              {mcp} <ChevronRight size={12} />
-            </button>
-          </footer>
+          <AgentDock
+            key={`agent-${sessionId}`}
+            context={context}
+            calls={calls}
+            status={mcp}
+            connected={mcp === 'Agent ready'}
+            ready={ready}
+            hint={
+              mode === '3d'
+                ? 'Drag on the skin to edit · outside to rotate'
+                : 'Pixel-perfect · select a region for your agent'
+            }
+            onSend={sendMessage}
+            onCancel={cancelMessage}
+            onClear={() => updateContext({ selection: undefined, mask: [] })}
+            onScope={(limitToContext) => updateContext({ limitToContext, scopeExplicit: true })}
+            onHelp={() => setHelp(true)}
+          />
+          <Timeline
+            key={`timeline-${sessionId}`}
+            journal={journal}
+            onCheckout={checkout}
+            onUndo={() => history('undo')}
+            onRedo={() => history('redo')}
+          />
         </section>
       )}
       {tab === 'gallery' && (
@@ -1197,6 +1279,28 @@ export default function Home() {
         </DialogContent>
       </Dialog>
     </main>
+  );
+}
+function ToolButton({
+  entry,
+  active,
+  onPick,
+}: {
+  entry: [any, string, string];
+  active: boolean;
+  onPick: () => void;
+}) {
+  const [Icon, , label] = entry;
+  return (
+    <button
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      className={active ? 'selected' : ''}
+      onClick={onPick}
+    >
+      <Icon />
+    </button>
   );
 }
 function GalleryCard({ item, onUse }: { item: any; onUse: () => void }) {

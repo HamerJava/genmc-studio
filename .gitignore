@@ -42,3 +42,4 @@ output/
 *.aiff
 *.mp4
 *.tar.gz
+*.tsbuildinfo

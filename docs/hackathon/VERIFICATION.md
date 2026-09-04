@@ -1,6 +1,20 @@
 # Verification — 4 September 2026
 
-## Passed
+## Current handoff audit
+
+The entries below are historical verification notes, not fresh proof of every feature on the current public deployment. The working tree has advanced since those runs.
+
+- Current automated suite: 22 tests pass, covering atlas/texture rules, revisions, masks, scope opt-in, sessions, message delivery/completion and export validation.
+- Public GitHub visibility and detectable MIT license verified using GitHub on September 4.
+- Existing live root returns HTTP 200 without credentials; Sites reports public access and version 13. This is reachability, not verification that the latest local features are deployed.
+- A firefighter skin was created through native WebMCP in the local in-app browser earlier in this task. The newer world-space scan shader has not received a fresh browser visual check.
+- The latest release still requires public deployment approval and a native smoke test against that deployed version.
+- The owner's newly recorded video has not been supplied or checked. Older synthetic-video notes below apply only to the historical demo.
+- Source tool count is 19. Earlier counts below describe older snapshots.
+
+See [READY_TO_SUBMIT.md](READY_TO_SUBMIT.md) for the remaining owner actions and confirmed deadline extension.
+
+## Historical checks (earlier snapshots)
 
 - Production build and TypeScript check.
 - Six automated tests covering Classic/Slim atlas coverage, all 72 regions, asymmetric pixel addresses, atomic edits, revision conflicts, base transparency, marker behavior and canonical PNG encoding.
@@ -13,20 +27,20 @@
 - Responsive UI inspected at 1440×900 and 390×844; page width equaled viewport width on mobile.
 - Public GitHub repository exposes MIT license; public app returns HTTP 200 without authentication.
 
-## Limits
+## Historical limitations and demo notes
 
 - No actual Minecraft client round-trip was tested; PNG validity and internal UV correspondence were tested.
 - Java profile providers can reject datacenter traffic or be unavailable. The UI reports this without inferring whether a skin is AI-generated. The service uses official Minecraft Services and Mojang, with the documented public Ashcon profile cache as a labeled fallback.
-- Draft is one anonymous browser-session document; concurrent multi-tab editing is not coordinated server-side. Clearing the browser cookie loses access.
+- That snapshot used one anonymous draft. The current source has separate persistent skin sessions; concurrent multi-tab editing is still not coordinated server-side. Clearing the browser cookie loses access.
 - Marker is removable and forgeable; it is only an export-origin hint.
-- Demo is a narrated walkthrough assembled from actual public app captures and verified native tool actions, not an uncut screen recording. Voice is synthetic. Video has English subtitles.
-- No YouTube upload or Devpost submission has been made.
+- The older demo was a narrated walkthrough assembled from actual public app captures and verified native tool actions, not an uncut screen recording. Its voice was synthetic and it had English subtitles. This does not describe the owner's new recording.
+- No YouTube upload or Devpost submission had been made at that historical check. Their current status is unknown.
 
 ## Submission reference
 
 Current Devpost overview checked on 4 September 2026: https://webmcp.devpost.com/
 It displays 4 September 2026 at 1:00am PDT (10:00am Europe/Berlin). Older rules/resources differ; confirm the active form before submitting. A public YouTube demo under three minutes with audio, public source repository and live URL are required.
 
-## September 4 editor update
+## Historical September 4 editor update (before the current handoff)
 
 Eight local automated tests pass, including sparse mixed-author history persistence and mask/context conflict checks. TypeScript and production build pass. Native local WebMCP retrieved a user-entered brief and a painted mask at body.overlay.bottom, performed an in-mask edit, rejected an out-of-mask edit, and read both agent and manual 3D stroke history. Undo/redo and draft reload retained the context and history. The live browser visually verified moving walk poses, agent edge glow, and the raised violet overlay grid. The previous demo video predates these additions.

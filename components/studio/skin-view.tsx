@@ -2,14 +2,22 @@
 import { useEffect, useRef, useState } from 'react';
 import * as T from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { atlas, dimensions, parts, type Part } from '@/lib/skin/atlas';
+import { atlas, dimensions, parts, regionAt, type Part } from '@/lib/skin/atlas';
 import { pixelCanvas, type Skin, type View } from '@/lib/skin/engine';
+import {
+  drawAgentFrame,
+  visualDuration,
+  agentScanPeriod,
+  type AgentVisual,
+} from '@/lib/skin/agent-visual';
 import type { Selection } from '@/lib/skin/workspace';
 
 type Props = {
   skin: Skin;
+  agentVisual?: AgentVisual;
   view: View;
   paint?: boolean;
+  markMethod?: string;
   grid?: boolean;
   mask?: number[];
   selected?: Selection;
@@ -20,6 +28,7 @@ type Props = {
 type Runtime = {
   texture: T.CanvasTexture;
   hints: T.CanvasTexture;
+  effect: T.CanvasTexture;
   root: T.Group;
   meshes: T.Mesh[];
   render: () => void;
@@ -60,8 +69,10 @@ export default function SkinView(props: Props) {
   const latest = useRef(props);
   latest.current = props;
   const state = useRef<Runtime | null>(null);
+  const scan = useRef({ height: { value: 36 }, reduced: { value: false } });
   const down = useRef(false);
   const [hovered, setHovered] = useState(false);
+  const [hoverPixel, setHoverPixel] = useState<number | null>(null);
   useEffect(() => {
     const el = host.current!;
     let disposed = false;
@@ -94,6 +105,11 @@ export default function SkinView(props: Props) {
     const hints = new T.CanvasTexture(hc);
     hints.magFilter = hints.minFilter = T.NearestFilter;
     hints.colorSpace = T.SRGBColorSpace;
+    const effectCanvas = document.createElement('canvas');
+    effectCanvas.width = effectCanvas.height = 64;
+    const effect = new T.CanvasTexture(effectCanvas);
+    effect.magFilter = effect.minFilter = T.NearestFilter;
+    effect.colorSpace = T.SRGBColorSpace;
     let hoverPointer: Pick<PointerEvent, 'clientX' | 'clientY'> | null = null;
     let hovering = false;
     let refreshHover = () => {};
@@ -106,6 +122,7 @@ export default function SkinView(props: Props) {
     state.current = {
       texture,
       hints,
+      effect,
       root,
       meshes: [],
       render,
@@ -175,11 +192,14 @@ export default function SkinView(props: Props) {
         .find(
           (h) =>
             h.object.visible &&
-            h.object.userData.layer === latest.current.view.layer,
+            h.object.userData.layer === (latest.current.view.partLayers?.[h.object.userData.part as Part] ?? latest.current.view.layer),
         );
     };
     refreshHover = () => {
-      const next = !!(hoverPointer && pick(hoverPointer));
+      const hit = hoverPointer ? pick(hoverPointer) : undefined;
+      const next = !!hit;
+      const index = hit?.uv ? Math.min(63, Math.floor((1 - hit.uv.y) * 64)) * 64 + Math.min(63, Math.floor(hit.uv.x * 64)) : null;
+      setHoverPixel(previous => previous === index ? previous : index);
       if (next !== hovering) {
         hovering = next;
         setHovered(next);
@@ -255,6 +275,7 @@ export default function SkinView(props: Props) {
       clear(root);
       texture.dispose();
       hints.dispose();
+      effect.dispose();
       renderer.dispose();
       el.replaceChildren();
       state.current = null;
@@ -262,12 +283,40 @@ export default function SkinView(props: Props) {
   }, []);
   useEffect(() => {
     const s = state.current;
-    if (s) {
-      s.texture.image = pixelCanvas(skin.pixels);
-      s.texture.needsUpdate = true;
+    if (!s) return;
+    let raf = 0;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const texture = pixelCanvas(skin.pixels);
+    s.texture.image = texture;
+    const frame = () => {
+      cancelAnimationFrame(raf);
+      const visual = props.agentVisual;
+      scan.current.height.value = 36 - (((performance.now() - (visual?.startedAt ?? 0)) / agentScanPeriod) % 1) * 40;
+      scan.current.reduced.value = reduced.matches;
+      const done =
+        !visual ||
+        (['done', 'error'].includes(visual.phase) &&
+          performance.now() - visual.startedAt >= visualDuration);
+      drawAgentFrame(
+        texture,
+        s.effect.image,
+        skin,
+        done ? undefined : visual,
+        performance.now(),
+        reduced.matches,
+        true,
+      );
+      s.texture.needsUpdate = s.effect.needsUpdate = true;
       s.render();
-    }
-  }, [skin.pixels]);
+      if (!done && !reduced.matches) raf = requestAnimationFrame(frame);
+    };
+    frame();
+    reduced.addEventListener('change', frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      reduced.removeEventListener('change', frame);
+    };
+  }, [skin.pixels, skin.revision, props.agentVisual]);
   useEffect(() => {
     const s = state.current;
     if (!s) return;
@@ -315,7 +364,9 @@ export default function SkinView(props: Props) {
         mesh.position.y = part === 'head' ? h / 2 : -h / 2;
         mesh.visible =
           view.visible[part] &&
-          (layer === 'base' ? view.showBase : view.showOverlay);
+          (layer === 'base' ? view.showBase : view.showOverlay) &&
+          view.partLayers?.[part] !== 'hidden' &&
+          (layer === 'base' || (view.partLayers?.[part] ?? view.layer) === 'overlay');
         mesh.userData = { part, layer };
         pivot.add(mesh);
         s.meshes.push(mesh);
@@ -340,6 +391,32 @@ export default function SkinView(props: Props) {
         hint.visible = mesh.visible;
         hint.renderOrder = 2;
         pivot.add(hint);
+        const effectMesh = new T.Mesh(
+          g.clone(),
+          new T.MeshBasicMaterial({
+            map: s.effect,
+            transparent: true,
+            depthWrite: false,
+            blending: T.AdditiveBlending,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2,
+          }),
+        );
+        effectMesh.position.copy(mesh.position);
+        // One world-space wave for the entire posed character, not one per UV island.
+        effectMesh.material.onBeforeCompile = shader => {
+          shader.uniforms.scanHeight = scan.current.height;
+          shader.uniforms.scanReduced = scan.current.reduced;
+          shader.vertexShader = 'varying float skinWorldY;\n' + shader.vertexShader;
+          shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nskinWorldY = (modelMatrix * vec4(position, 1.0)).y;');
+          shader.fragmentShader = 'varying float skinWorldY;\nuniform float scanHeight;\nuniform bool scanReduced;\n' + shader.fragmentShader;
+          shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', 'gl_FragColor.a *= scanReduced ? 0.22 : max(0.0, 1.0 - abs(skinWorldY - scanHeight) / 2.5);\n#include <dithering_fragment>');
+        };
+        effectMesh.scale.copy(hint.scale).multiplyScalar(1.002);
+        effectMesh.visible = mesh.visible;
+        effectMesh.renderOrder = 3;
+        pivot.add(effectMesh);
       }
       s.root.add(pivot);
     }
@@ -353,11 +430,11 @@ export default function SkinView(props: Props) {
     ctx.clearRect(0, 0, 768, 768);
     const regs = atlas(skin.model);
     if (grid && hovered) {
-      for (const r of regs.filter((r) => r.layer === view.layer)) {
+      for (const r of regs.filter((r) => view.visible[r.part] && r.layer === (view.partLayers?.[r.part] ?? view.layer))) {
         ctx.strokeStyle =
           view.layer === 'overlay'
-            ? 'rgba(137,105,193,.30)'
-            : 'rgba(53,99,85,.23)';
+            ? 'rgba(150,150,150,.30)'
+            : 'rgba(125,125,125,.23)';
         ctx.lineWidth = 0.75;
         ctx.beginPath();
         for (let x = 0; x <= r.width; x++) {
@@ -371,15 +448,25 @@ export default function SkinView(props: Props) {
         ctx.stroke();
       }
     }
+    if (props.markMethod && hoverPixel !== null && !down.current) {
+      const x = hoverPixel % 64, y = Math.floor(hoverPixel / 64);
+      const r = regionAt(skin.model, x, y);
+      const q = props.markMethod === 'face' && r ? r : { x, y, width: 1, height: 1 };
+      ctx.fillStyle = 'rgba(125,211,252,.22)';
+      ctx.fillRect(q.x * 12, q.y * 12, q.width * 12, q.height * 12);
+      ctx.strokeStyle = 'rgba(125,211,252,.6)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(q.x * 12 + .5, q.y * 12 + .5, q.width * 12 - 1, q.height * 12 - 1);
+    }
     if (selected) {
-      ctx.fillStyle = 'rgba(232,172,65,.22)';
+      ctx.fillStyle = 'rgba(125,211,252,.65)';
       ctx.fillRect(
         selected.x * 12,
         selected.y * 12,
         selected.width * 12,
         selected.height * 12,
       );
-      ctx.strokeStyle = 'rgba(232,160,38,.85)';
+      ctx.strokeStyle = 'rgba(125,211,252,.85)';
       ctx.lineWidth = 2;
       ctx.strokeRect(
         selected.x * 12 + 1,
@@ -388,12 +475,12 @@ export default function SkinView(props: Props) {
         selected.height * 12 - 2,
       );
     }
-    ctx.fillStyle = 'rgba(110,112,245,.48)';
+    ctx.fillStyle = 'rgba(125,211,252,.65)';
     for (const i of mask)
       ctx.fillRect((i % 64) * 12, Math.floor(i / 64) * 12, 12, 12);
     s.hints.needsUpdate = true;
     s.render();
-  }, [skin.model, view.layer, grid, hovered, mask, selected]);
+  }, [skin.model, view, grid, hovered, hoverPixel, props.markMethod, mask, selected]);
   return (
     <div
       ref={host}

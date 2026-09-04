@@ -1,3 +1,5 @@
+export const MAX_SAVED_COLORS = 128;
+import { validateMessages, type AgentMessage } from './inbox';
 import { atlas, regionAt, type Model } from './atlas';
 import type { Skin } from './engine';
 export type Selection = {
@@ -9,11 +11,13 @@ export type Selection = {
 };
 export type EditContext = {
   brief: string;
+  messages: AgentMessage[];
   revision: number;
   selection?: Selection;
   mask: number[];
   palette: string[];
   limitToContext: boolean;
+  scopeExplicit?: boolean;
 };
 export type Author = 'user' | 'agent';
 type Meta = Pick<Skin, 'name' | 'model' | 'sourceId'>;
@@ -29,10 +33,11 @@ export type Change = {
 export type Journal = { entries: Change[]; cursor: number };
 export const emptyContext: EditContext = {
   brief: '',
+  messages: [],
   revision: 0,
   mask: [],
   palette: [],
-  limitToContext: true,
+  limitToContext: false,
 };
 export const emptyJournal: Journal = { entries: [], cursor: 0 };
 const meta = (s: Skin): Meta => ({
@@ -97,6 +102,13 @@ export function travel(
     skin: { ...next, revision: skin.revision + 1 },
   };
 }
+/** Add a region to a gesture's original mask, without accumulating drag previews. */
+export function addMaskRegion(mask: number[], region: Pick<Selection, 'x' | 'y' | 'width' | 'height'>): number[] {
+  const selected = new Set(mask);
+  for (let y = region.y; y < region.y + region.height; y++)
+    for (let x = region.x; x < region.x + region.width; x++) selected.add(y * 64 + x);
+  return [...selected];
+}
 export function contextIndices(c: EditContext, model: Model): number[] {
   if (c.mask.length) return c.mask;
   const r = c.selection;
@@ -112,6 +124,7 @@ export function describeContext(c: EditContext, model: Model) {
   const selected = new Set(indices);
   return {
     ...c,
+    messages: undefined,
     mask: c.mask.map((i) => ({ x: i % 64, y: Math.floor(i / 64) })),
     scope: c.mask.length ? 'mask' : c.selection ? 'selection' : 'whole_skin',
     regions: atlas(model)
@@ -133,7 +146,10 @@ export function enforceContext(
   c: EditContext,
   expected?: number,
 ) {
-  if ((c.brief || c.selection || c.mask.length) && expected !== c.revision)
+  if (
+    (expected !== undefined || c.brief || c.selection || c.mask.length) &&
+    expected !== c.revision
+  )
     throw Error(
       `Context changed: read get_edit_context; expectedContextRevision must be ${c.revision}.`,
     );
@@ -167,7 +183,7 @@ export function validateWorkspace(raw: any): {
       (i: unknown) => !Number.isInteger(i) || Number(i) < 0 || Number(i) > 4095,
     ) ||
     !Array.isArray(c.palette) ||
-    c.palette.length > 32 ||
+    c.palette.length > MAX_SAVED_COLORS ||
     c.palette.some((v: unknown) => !hex(v))
   )
     throw Error('Invalid editing context');
@@ -225,5 +241,22 @@ export function validateWorkspace(raw: any): {
       )
         throw Error('Invalid history pixels');
   }
-  return { context: { ...c, mask: [...new Set(c.mask)] }, journal: j };
+  let messages = validateMessages(c.messages);
+  if (c.messages === undefined && c.brief.trim())
+    messages = [
+      {
+        id: 'legacy-brief',
+        text: c.brief,
+        createdAt: Date.now(),
+        readAt: null,
+        skinRevision: 0,
+        contextRevision: c.revision,
+        selection: c.selection,
+        mask: [...c.mask],
+      },
+    ];
+  return {
+    context: { ...c, limitToContext: c.scopeExplicit === true && c.limitToContext, messages, mask: [...new Set(c.mask)] },
+    journal: j,
+  };
 }

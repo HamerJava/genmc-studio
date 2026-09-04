@@ -12,10 +12,18 @@ test('mixed-author history survives storage and restores provenance and pixels',
  const branch=recordChange(back.journal,back.skin,b,'user','New branch');assert.equal(branch.entries.length,1);
 });
 test('mask scope and context revisions reject stale and out-of-mask edits atomically',()=>{
- const a=makeSkin();const context={...emptyContext,revision:7,brief:'Violet dot',mask:[520]};
+ const a=makeSkin();const context={...emptyContext,limitToContext:true,scopeExplicit:true,revision:7,brief:'Violet dot',mask:[520]};
  const inside=applyOperations(a,[{type:'pixel',x:8,y:8,color:'#8b5cf6'}],a.revision);
  assert.doesNotThrow(()=>enforceContext(a,inside,context,7));assert.throws(()=>enforceContext(a,inside,context,6),/Context changed/);
  const outside=applyOperations(a,[{type:'pixel',x:9,y:8,color:'#8b5cf6'}],a.revision);
  assert.throws(()=>enforceContext(a,outside,context,7),/marked area/);assert.deepEqual(describeContext(context,'classic').regions,['head.base.front']);
  assert.doesNotThrow(()=>enforceContext(a,outside,{...context,limitToContext:false},7));
+});
+test('marks are advisory by default and only explicit restrictions survive reload',()=>{
+ const context={...emptyContext,mask:[520]};
+ const a=makeSkin();
+ const outside=applyOperations(a,[{type:'pixel',x:9,y:8,color:'#8b5cf6'}],a.revision);
+ assert.doesNotThrow(()=>enforceContext(a,outside,context,0));
+ assert.equal(validateWorkspace({context:{...context,limitToContext:true},journal:emptyJournal}).context.limitToContext,false);
+ assert.equal(validateWorkspace({context:{...context,limitToContext:true,scopeExplicit:true},journal:emptyJournal}).context.limitToContext,true);
 });
